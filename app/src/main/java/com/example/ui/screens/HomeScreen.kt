@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,12 +32,17 @@ import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,7 +54,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
@@ -75,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.api.GeminiConstants
+import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.model.AnalysisState
 import com.example.data.model.SelectedVideo
 import com.example.ui.components.ResultView
@@ -91,11 +97,54 @@ fun HomeScreen(
     val analysisState by viewModel.analysisState.collectAsState()
     val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
 
+    val historyList by viewModel.historyList.collectAsState()
+    val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
+    val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsState()
+
     // Activity Result Launcher untuk memilih video dari galeri
     val videoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         uri?.let { viewModel.onVideoPicked(it) }
+    }
+
+    // Tampilkan Detail Riwayat jika sedang dipilih
+    viewingHistoryItem?.let { historyEntity ->
+        HistoryDetailScreen(
+            entity = historyEntity,
+            onBack = { viewModel.closeHistoryDetail() },
+            onResume = {
+                viewModel.startAnalysis(historyEntity.id)
+                viewModel.closeHistory()
+            }
+        )
+        return
+    }
+
+    // Tampilkan Layar Riwayat jika sedang dibuka
+    if (isHistoryOpen) {
+        HistoryScreen(
+            analyses = historyList,
+            onBack = { viewModel.closeHistory() },
+            onSelectAnalysis = { viewModel.openHistoryDetail(it) },
+            onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
+            onResumeAnalysis = { resumeId ->
+                viewModel.startAnalysis(resumeId)
+                viewModel.closeHistory()
+            }
+        )
+        return
+    }
+
+    // Tangani tombol Back sistem Android: jika di hasil/error kembalikan ke beranda, jika proses berjalan batalkan
+    if (analysisState is AnalysisState.Success || analysisState is AnalysisState.Error) {
+        BackHandler {
+            viewModel.resetAnalysis()
+        }
+    } else if (analysisState !is AnalysisState.Idle) {
+        BackHandler {
+            viewModel.cancelAnalysis()
+        }
     }
 
     Scaffold(
@@ -134,6 +183,40 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    // Tombol Riwayat Analisis
+                    IconButton(
+                        onClick = { viewModel.openHistory() },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("btn_open_history")
+                    ) {
+                        if (historyList.isNotEmpty()) {
+                            BadgedBox(
+                                badge = {
+                                    Badge(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ) {
+                                        Text("${historyList.size}")
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = "Riwayat Analisis",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = "Riwayat Analisis",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    // Tombol Pengaturan API
                     IconButton(
                         onClick = { viewModel.openSettings() },
                         modifier = Modifier
@@ -182,7 +265,7 @@ fun HomeScreen(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    text = "${state.result.totalSegments} Segmen • Interval ${state.result.intervalSeconds}s",
+                                    text = "${state.result.totalSegments} Segmen • Interval ${state.result.intervalSeconds}s (Tersimpan di Riwayat)",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -218,6 +301,7 @@ fun HomeScreen(
                     ErrorContent(
                         errorState = state,
                         onRetry = { viewModel.startAnalysis() },
+                        onResume = { resumeId -> viewModel.startAnalysis(resumeId) },
                         onOpenSettings = { viewModel.openSettings() },
                         onCancel = { viewModel.resetAnalysis() }
                     )
@@ -238,6 +322,7 @@ fun HomeScreen(
                     IdleSetupContent(
                         selectedVideo = selectedVideo,
                         promptInterval = promptInterval,
+                        historyList = historyList,
                         onSelectVideoClicked = {
                             videoPickerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -246,7 +331,9 @@ fun HomeScreen(
                         onClearVideo = { viewModel.clearSelectedVideo() },
                         onIntervalChanged = { viewModel.setIntervalSeconds(it) },
                         onStartAnalysis = { viewModel.startAnalysis() },
+                        onResumeAnalysis = { resumeId -> viewModel.startAnalysis(resumeId) },
                         onOpenSettings = { viewModel.openSettings() },
+                        onOpenHistory = { viewModel.openHistory() },
                         hasApiKey = viewModel.apiKeyStorage.hasApiKey()
                     )
                 }
@@ -267,14 +354,18 @@ fun HomeScreen(
 private fun IdleSetupContent(
     selectedVideo: SelectedVideo?,
     promptInterval: Int,
+    historyList: List<AnimeAnalysisEntity>,
     onSelectVideoClicked: () -> Unit,
     onClearVideo: () -> Unit,
     onIntervalChanged: (Int) -> Unit,
     onStartAnalysis: () -> Unit,
+    onResumeAnalysis: (Long) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit,
     hasApiKey: Boolean
 ) {
     val scrollState = rememberScrollState()
+    val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
 
     Column(
         modifier = Modifier
@@ -283,6 +374,87 @@ private fun IdleSetupContent(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Banner Lanjutkan Analisis Tertunda jika ada yang belum selesai
+        if (pendingAnalysis != null) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                        RoundedCornerShape(16.dp)
+                    )
+                    .testTag("banner_resume_pending")
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Movie,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Lanjutkan Analisis Tertunda",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "${pendingAnalysis.videoName} (Tersimpan Segmen ${pendingAnalysis.completedSegmentsCount} dari ${pendingAnalysis.totalSegments})",
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = { onResumeAnalysis(pendingAnalysis.id) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("btn_resume_pending_home")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Lanjutkan dari Segmen ${pendingAnalysis.completedSegmentsCount + 1}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+
         // Warning jika API key belum diatur
         if (!hasApiKey) {
             Card(
@@ -372,7 +544,7 @@ private fun IdleSetupContent(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Target pemakaian: 1 episode anime berdurasi 25-28 menit (format .mp4, .mkv, .webm)",
+                        text = "Target pemakaian: 1 episode anime berdurasi 25-28 menit (.mp4, .mkv, .webm)",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
@@ -599,17 +771,17 @@ private fun IdleSetupContent(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Alur Kerja Analisis AI:",
+                    text = "Penyimpanan & Fitur Lanjutkan (Room Database):",
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "• Upload berkas sekali via Gemini File API hingga status ACTIVE.\n" +
-                            "• Analisis segmen bertahap 3 menit dengan character sheet kontinu.\n" +
-                            "• Timestamp bersambung otomatis (00:00, 03:00, 06:00, dst).\n" +
-                            "• Pembuatan narasi alur cerita episode lengkap di akhir proses.",
+                    text = "• Hasil tiap segmen otomatis tersimpan ke database lokal begitu selesai.\n" +
+                            "• Jika gagal/terputus di tengah, Anda bisa melanjutkan tanpa mengulang dari awal.\n" +
+                            "• Cek otomatis status berkas AI di Gemini (upload ulang otomatis jika kedaluwarsa).\n" +
+                            "• Semua riwayat tersimpan permanen dan dapat dibuka kapan saja di menu Riwayat.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 16.sp
@@ -823,6 +995,7 @@ private fun ProgressContent(
 private fun ErrorContent(
     errorState: AnalysisState.Error,
     onRetry: () -> Unit,
+    onResume: (Long?) -> Unit,
     onOpenSettings: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -956,7 +1129,7 @@ private fun ErrorContent(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Tombol "Salin Detail Error"
                 OutlinedButton(
@@ -984,7 +1157,36 @@ private fun ErrorContent(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Fitur Lanjutkan jika ada segmen yang tersimpan
+                if (errorState.canResume) {
+                    Button(
+                        onClick = { onResume(errorState.analysisId) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_resume_from_error")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Lanjutkan dari Segmen ${errorState.resumeSegment}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
                 Row(
@@ -1009,8 +1211,10 @@ private fun ErrorContent(
                     Button(
                         onClick = onRetry,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
+                            containerColor = if (errorState.canResume) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.primary,
+                            contentColor = if (errorState.canResume) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onPrimary
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -1019,7 +1223,7 @@ private fun ErrorContent(
                             .testTag("btn_error_retry")
                     ) {
                         Text(
-                            text = "Coba Lagi",
+                            text = "Ulangi",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             maxLines = 1

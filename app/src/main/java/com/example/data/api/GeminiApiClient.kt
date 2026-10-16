@@ -278,6 +278,41 @@ class GeminiApiClient(
     }
 
     /**
+     * Memeriksa apakah berkas video di Gemini API masih berstatus ACTIVE.
+     * Mengembalikan true jika masih aktif dan dapat digunakan kembali tanpa upload ulang.
+     */
+    suspend fun isFileStillActive(fileName: String): Boolean = withContext(Dispatchers.IO) {
+        if (fileName.isBlank()) return@withContext false
+        val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
+        val apiKey = try {
+            getValidApiKey("Cek Status Berkas")
+        } catch (_: Exception) {
+            return@withContext false
+        }
+        val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
+        Log.i(TAG, "[Cek Status Berkas] Memeriksa apakah $cleanName masih ACTIVE...")
+
+        val request = Request.Builder().url(statusUrl).get().build()
+        try {
+            val response = client.newCall(request).execute()
+            response.use { res ->
+                if (!res.isSuccessful) {
+                    Log.d(TAG, "[Cek Status Berkas] Berkas $cleanName tidak dapat diakses (HTTP ${res.code})")
+                    return@withContext false
+                }
+                val body = res.body?.string().orEmpty()
+                val json = JSONObject(body)
+                val state = json.optString("state", "")
+                Log.i(TAG, "[Cek Status Berkas] Status terkini berkas $cleanName: $state")
+                state == "ACTIVE"
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[Cek Status Berkas] Gagal memeriksa status berkas: ${e.message}")
+            false
+        }
+    }
+
+    /**
      * Menganalisis satu segmen 3 menit memakai start/end offset pada file yang sama.
      * Dijalankan sepenuhnya di Dispatchers.IO.
      */

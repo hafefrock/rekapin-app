@@ -1,6 +1,9 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,16 +22,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -42,23 +48,137 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.TimelineItem
 
+object ExportFormatters {
+    fun formatFullExport(result: AnimeAnalysisResult): String {
+        return buildString {
+            appendLine("==================================================")
+            appendLine("       HASIL REKAPIN & PROMPT GENERATOR ANIME     ")
+            appendLine("==================================================")
+            if (result.videoName.isNotBlank()) {
+                appendLine("Video              : ${result.videoName}")
+            }
+            appendLine("Durasi Video       : ${result.durationFormatted}")
+            appendLine("Total Segmen       : ${result.totalSegments}")
+            appendLine("Interval Prompt    : ${result.intervalSeconds} detik")
+            appendLine("Total Karakter     : ${result.characterSheet.size}")
+            appendLine("Total Prompt Adegan: ${result.timeline.size}")
+            appendLine("==================================================")
+            appendLine()
+            appendLine("A. NARASI ALUR CERITA (RECAP NARRATIVE)")
+            appendLine("--------------------------------------------------")
+            appendLine(result.narration.ifBlank { "Tidak ada narasi yang dihasilkan." })
+            appendLine()
+            appendLine("B. LEMBAR KARAKTER (CHARACTER SHEET)")
+            appendLine("--------------------------------------------------")
+            if (result.characterSheet.isEmpty()) {
+                appendLine("Tidak ada karakter yang terdaftar.")
+            } else {
+                result.characterSheet.forEachIndexed { index, char ->
+                    appendLine("${index + 1}. ${char.name}")
+                    appendLine("   Deskripsi: ${char.description}")
+                    appendLine()
+                }
+            }
+            appendLine("C. TIMELINE VISUAL PROMPT (INTERVAL ${result.intervalSeconds}s)")
+            appendLine("--------------------------------------------------")
+            if (result.timeline.isEmpty()) {
+                appendLine("Tidak ada timeline visual prompt.")
+            } else {
+                result.timeline.forEachIndexed { index, item ->
+                    appendLine("[${item.timestamp}] Adegan #${index + 1}: ${item.sceneDescription}")
+                    appendLine("Visual Prompt:")
+                    appendLine(item.visualPrompt)
+                    appendLine()
+                }
+            }
+            appendLine("==================================================")
+            appendLine("Dihasilkan oleh Rekapin Anime AI")
+        }.trimEnd()
+    }
+
+    fun formatCharacterSheet(characters: List<CharacterInfo>): String {
+        if (characters.isEmpty()) return "Tidak ada karakter yang terdaftar."
+        return buildString {
+            appendLine("=== LEMBAR KARAKTER (CHARACTER SHEET) ===")
+            characters.forEachIndexed { index, char ->
+                appendLine("${index + 1}. ${char.name}")
+                appendLine("   ${char.description}")
+                if (index < characters.size - 1) appendLine()
+            }
+        }.trimEnd()
+    }
+
+    fun formatTimeline(timeline: List<TimelineItem>, intervalSeconds: Int): String {
+        if (timeline.isEmpty()) return "Timeline kosong."
+        return buildString {
+            appendLine("=== TIMELINE VISUAL PROMPT (Interval $intervalSeconds Detik) ===")
+            timeline.forEachIndexed { index, item ->
+                appendLine("[${item.timestamp}] Adegan #${index + 1}: ${item.sceneDescription}")
+                appendLine("Visual Prompt: ${item.visualPrompt}")
+                if (index < timeline.size - 1) appendLine()
+            }
+        }.trimEnd()
+    }
+
+    fun formatAllVisualPromptsOnly(timeline: List<TimelineItem>): String {
+        return timeline.map { it.visualPrompt.trim() }.joinToString(separator = "\n\n")
+    }
+}
+
 @Composable
 fun ResultView(
     result: AnimeAnalysisResult,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    val notify: (String) -> Unit = remember(context) {
+        { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val defaultFileName = remember(result.videoName) {
+        val rawName = result.videoName.trim()
+        if (rawName.isNotBlank()) {
+            val base = if (rawName.contains('.')) rawName.substringBeforeLast('.') else rawName
+            "$base.txt"
+        } else {
+            "analisis_anime.txt"
+        }
+    }
+
+    val exportFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val exportText = ExportFormatters.formatFullExport(result)
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(exportText.toByteArray(Charsets.UTF_8))
+                    outputStream.flush()
+                }
+                notify("Tersimpan")
+            } catch (e: Exception) {
+                Toast.makeText(context, "Gagal menyimpan berkas: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf(
         "Semua Format",
@@ -70,6 +190,73 @@ fun ResultView(
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
+        // Quick Action Bar: "Salin Semua" & "Ekspor .txt"
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = {
+                    val fullText = ExportFormatters.formatFullExport(result)
+                    clipboard.setText(AnnotatedString(fullText))
+                    notify("Tersalin")
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("btn_copy_all_results")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Salin Semua",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    try {
+                        exportFileLauncher.launch(defaultFileName)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Tidak dapat membuka file picker: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .testTag("btn_export_txt")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FileDownload,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Ekspor .txt",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
         // Tab Navigation
         ScrollableTabRow(
             selectedTabIndex = selectedTab,
@@ -106,44 +293,116 @@ fun ResultView(
         Spacer(modifier = Modifier.height(12.dp))
 
         when (selectedTab) {
-            0 -> AllResultsSection(result)
-            1 -> NarrationSection(result.narration)
-            2 -> CharacterSheetSection(result.characterSheet)
-            3 -> TimelineSection(result.timeline, result.intervalSeconds)
+            0 -> AllResultsSection(
+                result = result,
+                onCopyNarration = {
+                    clipboard.setText(AnnotatedString(result.narration))
+                    notify("Tersalin")
+                },
+                onCopyCharacters = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
+                    notify("Tersalin")
+                },
+                onCopyTimeline = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
+                    notify("Tersalin")
+                },
+                onCopyAllVisualPrompts = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(result.timeline)))
+                    notify("Tersalin")
+                },
+                onCopyScenePrompt = { prompt ->
+                    clipboard.setText(AnnotatedString(prompt))
+                    notify("Tersalin")
+                }
+            )
+            1 -> NarrationSection(
+                narration = result.narration,
+                onCopyNarration = {
+                    clipboard.setText(AnnotatedString(result.narration))
+                    notify("Tersalin")
+                }
+            )
+            2 -> CharacterSheetSection(
+                characters = result.characterSheet,
+                onCopyCharacters = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
+                    notify("Tersalin")
+                }
+            )
+            3 -> TimelineSection(
+                timeline = result.timeline,
+                intervalSeconds = result.intervalSeconds,
+                onCopyTimeline = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
+                    notify("Tersalin")
+                },
+                onCopyAllVisualPrompts = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(result.timeline)))
+                    notify("Tersalin")
+                },
+                onCopyScenePrompt = { prompt ->
+                    clipboard.setText(AnnotatedString(prompt))
+                    notify("Tersalin")
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun AllResultsSection(result: AnimeAnalysisResult) {
+private fun AllResultsSection(
+    result: AnimeAnalysisResult,
+    onCopyNarration: () -> Unit,
+    onCopyCharacters: () -> Unit,
+    onCopyTimeline: () -> Unit,
+    onCopyAllVisualPrompts: () -> Unit,
+    onCopyScenePrompt: (String) -> Unit
+) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
+        // Section a: Narasi
         item {
             SectionHeader(
                 stepLabel = "a. Narasi Alur Cerita",
-                subtitle = "Rekap cerita mengalir bergaya narator anime (Natural American English)"
+                subtitle = "Rekap cerita mengalir bergaya narator anime (Natural American English)",
+                onCopy = onCopyNarration,
+                copyLabel = "Salin"
             )
             Spacer(modifier = Modifier.height(8.dp))
-            NarrationCard(result.narration)
+            NarrationCard(
+                narration = result.narration,
+                onCopy = onCopyNarration
+            )
         }
 
+        // Section b: Lembar Karakter
         item {
             Spacer(modifier = Modifier.height(8.dp))
             SectionHeader(
                 stepLabel = "b. Lembar Karakter (Character Sheet)",
-                subtitle = "Deskripsi tetap karakter utama (rambut, mata, pakaian, warna ciri khas)"
+                subtitle = "Deskripsi tetap karakter utama (rambut, mata, pakaian, warna ciri khas)",
+                onCopy = onCopyCharacters,
+                copyLabel = "Salin"
             )
         }
 
         if (result.characterSheet.isEmpty()) {
             item {
-                Text(
-                    text = "Tidak ada karakter spesifik yang terdeteksi.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 13.sp
-                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Belum ada karakter spesifik yang terdaftar pada segmen ini.",
+                        modifier = Modifier.padding(14.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
             }
         } else {
             itemsIndexed(result.characterSheet) { _, charInfo ->
@@ -151,38 +410,61 @@ private fun AllResultsSection(result: AnimeAnalysisResult) {
             }
         }
 
+        // Section c: Timeline Visual Prompt
         item {
             Spacer(modifier = Modifier.height(8.dp))
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt",
-                subtitle = "Interval ${result.intervalSeconds} detik dengan format 2D Japanese anime prompt"
+                subtitle = "Interval ${result.intervalSeconds} detik dengan format 2D Japanese anime prompt",
+                onCopy = onCopyTimeline,
+                copyLabel = "Salin"
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TimelineActionRow(
+                onCopyTimeline = onCopyTimeline,
+                onCopyAllVisualPrompts = onCopyAllVisualPrompts
             )
         }
 
         itemsIndexed(result.timeline) { index, timelineItem ->
-            TimelineCard(index = index + 1, item = timelineItem)
+            TimelineCard(
+                index = index + 1,
+                item = timelineItem,
+                onCopyPrompt = { onCopyScenePrompt(timelineItem.visualPrompt) }
+            )
         }
     }
 }
 
 @Composable
-private fun NarrationSection(narration: String) {
+private fun NarrationSection(
+    narration: String,
+    onCopyNarration: () -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth()
     ) {
         item {
             SectionHeader(
                 stepLabel = "a. Narasi Episode",
-                subtitle = "Rekap alur cerita bergaya narator, mengalir dan emosional"
+                subtitle = "Rekap alur cerita bergaya narator, mengalir dan emosional",
+                onCopy = onCopyNarration,
+                copyLabel = "Salin"
             )
             Spacer(modifier = Modifier.height(10.dp))
-            NarrationCard(narration)
+            NarrationCard(
+                narration = narration,
+                onCopy = onCopyNarration
+            )
         }
     }
 }
 
 @Composable
-private fun CharacterSheetSection(characters: List<CharacterInfo>) {
+private fun CharacterSheetSection(
+    characters: List<CharacterInfo>,
+    onCopyCharacters: () -> Unit
+) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxWidth()
@@ -190,7 +472,9 @@ private fun CharacterSheetSection(characters: List<CharacterInfo>) {
         item {
             SectionHeader(
                 stepLabel = "b. Character Sheet (${characters.size} Karakter)",
-                subtitle = "Deskripsi visual tetap untuk konsistensi prompt lintas adegan"
+                subtitle = "Deskripsi visual tetap untuk konsistensi prompt lintas adegan",
+                onCopy = onCopyCharacters,
+                copyLabel = "Salin"
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -217,7 +501,13 @@ private fun CharacterSheetSection(characters: List<CharacterInfo>) {
 }
 
 @Composable
-private fun TimelineSection(timeline: List<TimelineItem>, intervalSeconds: Int) {
+private fun TimelineSection(
+    timeline: List<TimelineItem>,
+    intervalSeconds: Int,
+    onCopyTimeline: () -> Unit,
+    onCopyAllVisualPrompts: () -> Unit,
+    onCopyScenePrompt: (String) -> Unit
+) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxWidth()
@@ -225,47 +515,155 @@ private fun TimelineSection(timeline: List<TimelineItem>, intervalSeconds: Int) 
         item {
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt (${timeline.size} Adegan)",
-                subtitle = "Interval $intervalSeconds detik, prompt 2D anime cel-shaded HD"
+                subtitle = "Interval $intervalSeconds detik, prompt 2D anime cel-shaded HD",
+                onCopy = onCopyTimeline,
+                copyLabel = "Salin"
             )
             Spacer(modifier = Modifier.height(8.dp))
+            TimelineActionRow(
+                onCopyTimeline = onCopyTimeline,
+                onCopyAllVisualPrompts = onCopyAllVisualPrompts
+            )
+            Spacer(modifier = Modifier.height(4.dp))
         }
 
         itemsIndexed(timeline) { index, item ->
-            TimelineCard(index = index + 1, item = item)
+            TimelineCard(
+                index = index + 1,
+                item = item,
+                onCopyPrompt = { onCopyScenePrompt(item.visualPrompt) }
+            )
         }
     }
 }
 
 @Composable
-private fun SectionHeader(stepLabel: String, subtitle: String) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
+private fun TimelineActionRow(
+    onCopyTimeline: () -> Unit,
+    onCopyAllVisualPrompts: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        OutlinedButton(
+            onClick = onCopyTimeline,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp)
+                .testTag("btn_copy_timeline_section")
+        ) {
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = stepLabel,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                text = "Salin Timeline",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = subtitle,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+
+        Button(
+            onClick = onCopyAllVisualPrompts,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.primary
+            ),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .weight(1.35f)
+                .height(40.dp)
+                .testTag("btn_copy_all_visual_prompts")
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "Salin Semua Visual Prompt",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
 @Composable
-private fun NarrationCard(narration: String) {
-    val clipboard = LocalClipboardManager.current
+private fun SectionHeader(
+    stepLabel: String,
+    subtitle: String,
+    onCopy: (() -> Unit)? = null,
+    copyLabel: String = "Salin"
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stepLabel,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        if (onCopy != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = onCopy,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .height(34.dp)
+                    .testTag("btn_copy_section_${stepLabel.take(1)}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = copyLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NarrationCard(
+    narration: String,
+    onCopy: () -> Unit
+) {
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -293,7 +691,7 @@ private fun NarrationCard(narration: String) {
                     )
                 }
                 IconButton(
-                    onClick = { clipboard.setText(AnnotatedString(narration)) },
+                    onClick = onCopy,
                     modifier = Modifier
                         .size(36.dp)
                         .testTag("copy_narration_button")
@@ -368,8 +766,11 @@ private fun CharacterCard(charInfo: CharacterInfo) {
 }
 
 @Composable
-private fun TimelineCard(index: Int, item: TimelineItem) {
-    val clipboard = LocalClipboardManager.current
+private fun TimelineCard(
+    index: Int,
+    item: TimelineItem,
+    onCopyPrompt: () -> Unit
+) {
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -378,7 +779,7 @@ private fun TimelineCard(index: Int, item: TimelineItem) {
             .padding(vertical = 4.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Header bar: Timestamp badge & Copy action
+            // Header bar: Timestamp badge & Copy action (hanya visual prompt)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -416,14 +817,14 @@ private fun TimelineCard(index: Int, item: TimelineItem) {
                 }
 
                 IconButton(
-                    onClick = { clipboard.setText(AnnotatedString(item.visualPrompt)) },
+                    onClick = onCopyPrompt,
                     modifier = Modifier
                         .size(36.dp)
                         .testTag("copy_prompt_button_$index")
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Salin Prompt",
+                        contentDescription = "Salin Visual Prompt",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
                     )

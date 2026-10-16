@@ -40,7 +40,10 @@ sealed interface AnalysisState {
         val httpCode: Int? = null,
         val rawApiMessage: String,
         val errorMessage: String,
-        val canRetry: Boolean = true
+        val canRetry: Boolean = true,
+        val canResume: Boolean = false,
+        val resumeSegment: Int = 1,
+        val analysisId: Long? = null
     ) : AnalysisState {
         fun getFullReport(): String {
             return buildString {

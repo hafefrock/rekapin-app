@@ -17,7 +17,8 @@ data class AnimeAnalysisResult(
     val timeline: List<TimelineItem>,
     val totalSegments: Int,
     val durationFormatted: String,
-    val intervalSeconds: Int
+    val intervalSeconds: Int,
+    val videoName: String = ""
 )
 
 data class SegmentAnalysisOutput(
