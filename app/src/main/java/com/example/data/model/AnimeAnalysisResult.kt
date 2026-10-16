@@ -1,0 +1,27 @@
+package com.example.data.model
+
+data class CharacterInfo(
+    val name: String,
+    val description: String
+)
+
+data class TimelineItem(
+    val timestamp: String,
+    val sceneDescription: String,
+    val visualPrompt: String
+)
+
+data class AnimeAnalysisResult(
+    val narration: String,
+    val characterSheet: List<CharacterInfo>,
+    val timeline: List<TimelineItem>,
+    val totalSegments: Int,
+    val durationFormatted: String,
+    val intervalSeconds: Int
+)
+
+data class SegmentAnalysisOutput(
+    val segmentSummary: String,
+    val characterSheet: List<CharacterInfo>,
+    val timeline: List<TimelineItem>
+)

@@ -1,0 +1,6 @@
+{
+  "name": "Rekapin",
+  "description": "Analisis video anime dengan AI Gemini: narasi alur, lembar karakter, dan timeline visual prompt terstruktur.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
