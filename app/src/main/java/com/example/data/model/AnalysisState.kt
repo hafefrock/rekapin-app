@@ -1,5 +1,7 @@
 package com.example.data.model
 
+import com.example.data.api.GeminiConstants
+
 sealed interface AnalysisState {
     object Idle : AnalysisState
 
@@ -34,7 +36,24 @@ sealed interface AnalysisState {
     ) : AnalysisState
 
     data class Error(
+        val stage: String,
+        val httpCode: Int? = null,
+        val rawApiMessage: String,
         val errorMessage: String,
         val canRetry: Boolean = true
-    ) : AnalysisState
+    ) : AnalysisState {
+        fun getFullReport(): String {
+            return buildString {
+                appendLine("=== Rekapin Error Report ===")
+                appendLine("Tahap: $stage")
+                if (httpCode != null) {
+                    appendLine("Kode HTTP: $httpCode")
+                }
+                appendLine("Model: ${GeminiConstants.GEMINI_MODEL}")
+                appendLine("Penjelasan: $errorMessage")
+                appendLine("\nDetail Pesan Asli API / Server:")
+                appendLine(rawApiMessage)
+            }
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package com.example.data.api
 
 import android.content.Context
+import android.util.Log
 import com.example.data.model.CharacterInfo
 import com.example.data.model.SegmentAnalysisOutput
 import com.example.data.model.SelectedVideo
@@ -25,6 +26,10 @@ import kotlin.coroutines.resumeWithException
 class GeminiApiClient(
     private val apiKeyProvider: () -> String
 ) {
+    companion object {
+        private const val TAG = "RekapinAI"
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(300, TimeUnit.SECONDS)
@@ -39,15 +44,19 @@ class GeminiApiClient(
 
     /**
      * Mengunggah video anime ke Gemini File API via Resumable Upload
-     * dengan pemantauan progres real-time.
+     * dengan streaming langsung dari URI (buffer 64KB, ramah RAM kecil).
      */
     suspend fun uploadVideo(
         context: Context,
         video: SelectedVideo,
         onProgress: (progressPercent: Int, bytesSent: Long, totalBytes: Long) -> Unit
     ): UploadedFile {
-        val apiKey = getValidApiKey()
+        val stageName = "Upload Video"
+        val apiKey = getValidApiKey(stageName)
         val mimeType = if (video.mimeType.isNotBlank()) video.mimeType else "video/mp4"
+
+        Log.i(TAG, "[$stageName] Memulai pengunggahan video: ${video.displayName}")
+        Log.i(TAG, "[$stageName] Ukuran berkas: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType, URI: ${video.uri}")
 
         // Langkah 1: Inisialisasi Resumable Upload
         val initUrl = "${GeminiConstants.UPLOAD_ENDPOINT}?key=$apiKey"
@@ -73,13 +82,25 @@ class GeminiApiClient(
             try {
                 val response = call.execute()
                 response.use { res ->
+                    val errBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
-                        val errBody = res.body?.string().orEmpty()
-                        throw IOException("Gagal memulai upload (HTTP ${res.code}): ${parseErrorMessage(errBody, res.code)}")
+                        Log.e(TAG, "[$stageName] Inisialisasi upload gagal. HTTP ${res.code}: $errBody")
+                        throw GeminiApiException(
+                            stage = stageName,
+                            httpCode = res.code,
+                            rawMessage = errBody,
+                            userFriendlyMessage = "Gagal memulai upload video ke server Google AI: ${parseErrorMessage(errBody, res.code)}"
+                        )
                     }
                     val url = res.header("x-goog-upload-url")
                         ?: res.header("X-Goog-Upload-URL")
-                        ?: throw IOException("Server tidak mengembalikan URL upload.")
+                        ?: throw GeminiApiException(
+                            stage = stageName,
+                            httpCode = res.code,
+                            rawMessage = "Header x-goog-upload-url tidak ditemukan dalam respons: $errBody",
+                            userFriendlyMessage = "Server Google AI tidak mengembalikan alamat URL upload resumable."
+                        )
+                    Log.d(TAG, "[$stageName] Sesi resumable upload berhasil dibuat: $url")
                     continuation.resume(url)
                 }
             } catch (e: Exception) {
@@ -87,23 +108,38 @@ class GeminiApiClient(
             }
         }
 
-        // Langkah 2: Unggah byte video dengan pemantauan progres
+        // Langkah 2: Unggah byte video secara streaming dari InputStream
+        // Tanpa membaca seluruh file ke dalam RAM
         val streamRequestBody = object : RequestBody() {
             override fun contentType() = (mimeType.toMediaTypeOrNull() ?: "application/octet-stream".toMediaType())
             override fun contentLength() = video.sizeBytes
 
             override fun writeTo(sink: BufferedSink) {
+                Log.d(TAG, "[$stageName] Membuka InputStream dari URI untuk streaming data...")
                 context.contentResolver.openInputStream(video.uri)?.use { inputStream ->
-                    val buffer = ByteArray(64 * 1024)
+                    val buffer = ByteArray(64 * 1024) // 64 KB buffer hemat RAM
                     var uploaded = 0L
                     var read: Int
+                    var lastLoggedPercent = -1
+
                     while (inputStream.read(buffer).also { read = it } != -1) {
                         sink.write(buffer, 0, read)
                         uploaded += read
                         val percent = if (video.sizeBytes > 0) ((uploaded * 100) / video.sizeBytes).toInt() else 0
                         onProgress(percent.coerceIn(0, 100), uploaded, video.sizeBytes)
+
+                        if (percent % 25 == 0 && percent != lastLoggedPercent) {
+                            Log.d(TAG, "[$stageName] Streaming progres: $percent% ($uploaded / ${video.sizeBytes} bytes)")
+                            lastLoggedPercent = percent
+                        }
                     }
-                } ?: throw IOException("Tidak dapat membaca berkas video yang dipilih.")
+                    Log.i(TAG, "[$stageName] Selesai streaming semua byte ($uploaded bytes)")
+                } ?: throw GeminiApiException(
+                    stage = stageName,
+                    httpCode = null,
+                    rawMessage = "ContentResolver gagal membuka InputStream dari URI: ${video.uri}",
+                    userFriendlyMessage = "Tidak dapat membaca berkas video dari penyimpanan perangkat."
+                )
             }
         }
 
@@ -123,14 +159,28 @@ class GeminiApiClient(
                 response.use { res ->
                     val respBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
-                        throw IOException("Gagal menyelesaikan upload (HTTP ${res.code}): ${parseErrorMessage(respBody, res.code)}")
+                        Log.e(TAG, "[$stageName] Finalisasi upload gagal. HTTP ${res.code}: $respBody")
+                        throw GeminiApiException(
+                            stage = stageName,
+                            httpCode = res.code,
+                            rawMessage = respBody,
+                            userFriendlyMessage = "Gagal menyelesaikan pengunggahan video: ${parseErrorMessage(respBody, res.code)}"
+                        )
                     }
+
+                    Log.d(TAG, "[$stageName] Respons upload: $respBody")
                     val json = JSONObject(respBody)
                     val fileObj = json.optJSONObject("file")
-                        ?: throw IOException("Format respons berkas tidak valid.")
+                        ?: throw GeminiApiException(
+                            stage = stageName,
+                            httpCode = res.code,
+                            rawMessage = respBody,
+                            userFriendlyMessage = "Format JSON berkas dari server tidak valid."
+                        )
                     val name = fileObj.getString("name")
                     val uri = fileObj.optString("uri", "https://generativelanguage.googleapis.com/v1beta/$name")
                     val state = fileObj.optString("state", "PROCESSING")
+                    Log.i(TAG, "[$stageName] Upload sukses! Nama: $name, Status Awal: $state, URI: $uri")
                     continuation.resume(UploadedFile(name = name, uri = uri, state = state))
                 }
             } catch (e: Exception) {
@@ -146,10 +196,12 @@ class GeminiApiClient(
         fileName: String,
         onStatusUpdate: (String) -> Unit
     ): UploadedFile {
-        val apiKey = getValidApiKey()
+        val stageName = "Menunggu File ACTIVE"
+        val apiKey = getValidApiKey(stageName)
         val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
 
+        Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName")
         var attempts = 0
         val maxAttempts = 60 // 60 x 3 detik = 3 menit batas maksimum polling
 
@@ -168,12 +220,19 @@ class GeminiApiClient(
                     response.use { res ->
                         val respBody = res.body?.string().orEmpty()
                         if (!res.isSuccessful) {
-                            throw IOException("Gagal memeriksa status berkas (HTTP ${res.code}): ${parseErrorMessage(respBody, res.code)}")
+                            Log.e(TAG, "[$stageName] Gagal memeriksa status berkas. HTTP ${res.code}: $respBody")
+                            throw GeminiApiException(
+                                stage = stageName,
+                                httpCode = res.code,
+                                rawMessage = respBody,
+                                userFriendlyMessage = "Gagal memeriksa status video: ${parseErrorMessage(respBody, res.code)}"
+                            )
                         }
                         val json = JSONObject(respBody)
                         val name = json.optString("name", cleanName)
                         val uri = json.optString("uri", "https://generativelanguage.googleapis.com/v1beta/$name")
                         val state = json.optString("state", "PROCESSING")
+                        Log.d(TAG, "[$stageName] Polling [$attempts/$maxAttempts]: state = $state")
                         continuation.resume(UploadedFile(name, uri, state))
                     }
                 } catch (e: Exception) {
@@ -184,11 +243,18 @@ class GeminiApiClient(
             if (fileResult != null) {
                 when (fileResult.state) {
                     "ACTIVE" -> {
+                        Log.i(TAG, "[$stageName] Berkas video telah ACTIVE dan siap dianalisis!")
                         onStatusUpdate("Video siap dianalisis (Status: ACTIVE)")
                         return fileResult
                     }
                     "FAILED" -> {
-                        throw IOException("Pemrosesan video di server Gemini gagal. Format video mungkin tidak didukung.")
+                        Log.e(TAG, "[$stageName] Berkas video berstatus FAILED di server Google AI")
+                        throw GeminiApiException(
+                            stage = stageName,
+                            httpCode = null,
+                            rawMessage = "File state: FAILED. Google AI tidak dapat memproses video ini.",
+                            userFriendlyMessage = "Pemrosesan video di server Gemini gagal (Status: FAILED). Format kodek video mungkin tidak didukung."
+                        )
                     }
                     else -> {
                         onStatusUpdate("Memproses file video di Google AI (Status: ${fileResult.state})... [$attempts]")
@@ -199,13 +265,20 @@ class GeminiApiClient(
             delay(3000L)
         }
 
-        throw IOException("Batas waktu pemrosesan video habis (timeout 3 menit). Silakan coba lagi.")
+        throw GeminiApiException(
+            stage = stageName,
+            httpCode = null,
+            rawMessage = "Timeout polling 3 menit terlampaui tanpa status ACTIVE.",
+            userFriendlyMessage = "Batas waktu pemrosesan video habis (timeout 3 menit). Silakan coba lagi."
+        )
     }
 
     /**
      * Menganalisis satu segmen 3 menit memakai start/end offset pada file yang sama.
      */
     suspend fun analyzeSegment(
+        currentSegment: Int,
+        totalSegments: Int,
         fileUri: String,
         mimeType: String,
         startSec: Long,
@@ -215,9 +288,13 @@ class GeminiApiClient(
         isFirstSegment: Boolean,
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput {
-        val apiKey = getValidApiKey()
         val startFormatted = formatTimeSeconds(startSec)
         val endFormatted = formatTimeSeconds(endSec)
+        val stageName = "Analisis Segmen $currentSegment dari $totalSegments ($startFormatted - $endFormatted)"
+        val apiKey = getValidApiKey(stageName)
+
+        Log.i(TAG, "[$stageName] Memulai analisis offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s")
+        Log.d(TAG, "[$stageName] Karakter yang telah dikenal sebelumnya: ${previousCharacterSheet.map { it.name }}")
 
         val prompt = buildSegmentPrompt(
             startFormatted = startFormatted,
@@ -233,7 +310,6 @@ class GeminiApiClient(
             val contentsArray = JSONArray().apply {
                 val contentObj = JSONObject().apply {
                     val partsArray = JSONArray().apply {
-                        // File Data part dengan videoMetadata offset
                         val fileDataPart = JSONObject().apply {
                             put("fileData", JSONObject().apply {
                                 put("fileUri", fileUri)
@@ -246,7 +322,6 @@ class GeminiApiClient(
                         }
                         put(fileDataPart)
 
-                        // Text Prompt part
                         val textPart = JSONObject().apply {
                             put("text", prompt)
                         }
@@ -267,8 +342,16 @@ class GeminiApiClient(
 
         val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${GeminiConstants.GEMINI_MODEL}:generateContent?key=$apiKey"
 
-        val responseJsonString = executeWithRetry(endpoint, requestPayload, onStatusUpdate)
-        return parseSegmentOutput(responseJsonString)
+        val responseJsonString = executeWithRetry(
+            stage = stageName,
+            url = endpoint,
+            jsonBody = requestPayload,
+            onStatusUpdate = onStatusUpdate
+        )
+
+        val output = parseSegmentOutput(stageName, responseJsonString)
+        Log.i(TAG, "[$stageName] Berhasil! Ringkasan: \"${output.segmentSummary.take(60)}...\", Karakter: ${output.characterSheet.size}, Timeline items: ${output.timeline.size}")
+        return output
     }
 
     /**
@@ -280,7 +363,10 @@ class GeminiApiClient(
         characterSheet: List<CharacterInfo>,
         onStatusUpdate: (String) -> Unit
     ): String {
-        val apiKey = getValidApiKey()
+        val stageName = "Penyusunan Narasi Rekap Episode"
+        val apiKey = getValidApiKey(stageName)
+
+        Log.i(TAG, "[$stageName] Menyusun narasi dari ${segmentSummaries.size} ringkasan segmen")
 
         val summariesText = segmentSummaries.mapIndexed { idx, sum ->
             "Segment ${idx + 1}: $sum"
@@ -326,25 +412,50 @@ class GeminiApiClient(
         }.toString()
 
         val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${GeminiConstants.GEMINI_MODEL}:generateContent?key=$apiKey"
-        val rawResponse = executeWithRetry(endpoint, requestPayload, onStatusUpdate)
+        val rawResponse = executeWithRetry(
+            stage = stageName,
+            url = endpoint,
+            jsonBody = requestPayload,
+            onStatusUpdate = onStatusUpdate
+        )
 
-        val json = JSONObject(rawResponse)
-        val candidates = json.optJSONArray("candidates")
-        if (candidates != null && candidates.length() > 0) {
-            val firstCandidate = candidates.getJSONObject(0)
-            val content = firstCandidate.optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            if (parts != null && parts.length() > 0) {
-                return parts.getJSONObject(0).optString("text", "").trim()
+        try {
+            val json = JSONObject(rawResponse)
+            val candidates = json.optJSONArray("candidates")
+            if (candidates != null && candidates.length() > 0) {
+                val firstCandidate = candidates.getJSONObject(0)
+                val content = firstCandidate.optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                if (parts != null && parts.length() > 0) {
+                    val narrationText = parts.getJSONObject(0).optString("text", "").trim()
+                    Log.i(TAG, "[$stageName] Narasi berhasil dibuat (${narrationText.length} karakter)")
+                    return narrationText
+                }
             }
+            throw GeminiApiException(
+                stage = stageName,
+                httpCode = 200,
+                rawMessage = rawResponse,
+                userFriendlyMessage = "Respons dari AI tidak memuat kandidat teks narasi."
+            )
+        } catch (e: GeminiApiException) {
+            throw e
+        } catch (e: Exception) {
+            throw GeminiApiException(
+                stage = stageName,
+                httpCode = 200,
+                rawMessage = "Gagal memproses JSON respons: ${e.message}\nRespons Mentah:\n$rawResponse",
+                userFriendlyMessage = "Gagal membaca teks narasi yang dihasilkan AI.",
+                cause = e
+            )
         }
-        throw IOException("Gagal menyusun narasi episode: respons kosong dari AI.")
     }
 
     /**
      * Eksekusi request dengan jeda dan auto-retry backoff saat rate limit (429/503).
      */
     private suspend fun executeWithRetry(
+        stage: String,
         url: String,
         jsonBody: String,
         onStatusUpdate: (String) -> Unit
@@ -354,6 +465,8 @@ class GeminiApiClient(
 
         while (true) {
             attempt++
+            Log.d(TAG, "[$stage] Mengirim permintaan HTTP (Percobaan $attempt)...")
+
             val request = Request.Builder()
                 .url(url)
                 .addHeader("Content-Type", "application/json; charset=utf-8")
@@ -376,37 +489,55 @@ class GeminiApiClient(
                 }
 
                 val (statusCode, responseBody) = result
+                Log.d(TAG, "[$stage] Mendapat HTTP $statusCode, ukuran respons: ${responseBody.length} karakter")
 
                 if (statusCode in 200..299) {
-                    // Jeda teratur untuk mematuhi rate-limit tier gratis
                     delay(GeminiConstants.REQUEST_DELAY_MS)
                     return responseBody
                 }
 
                 if (statusCode == 429 || statusCode == 503) {
                     if (attempt <= GeminiConstants.MAX_RETRIES) {
-                        onStatusUpdate("Mencapai batas kuota sementara (HTTP $statusCode). Mencoba ulang secara otomatis dalam ${backoffMs / 1000} detik (Percobaan $attempt dari ${GeminiConstants.MAX_RETRIES})...")
+                        Log.w(TAG, "[$stage] Terkena rate limit HTTP $statusCode. Auto-retry dalam ${backoffMs / 1000}s (Percobaan $attempt dari ${GeminiConstants.MAX_RETRIES})")
+                        onStatusUpdate("Mencapai batas kuota sementara (HTTP $statusCode). Mencoba ulang otomatis dalam ${backoffMs / 1000} detik ($attempt/${GeminiConstants.MAX_RETRIES})...")
                         delay(backoffMs)
                         backoffMs *= 2
                         continue
                     } else {
-                        throw IOException("Batas permintaan Gemini terlampaui (429/503). Silakan tunggu beberapa menit atau periksa kuota API Key Anda di Pengaturan.")
+                        Log.e(TAG, "[$stage] Percobaan maksimum habis. HTTP $statusCode: $responseBody")
+                        throw GeminiApiException(
+                            stage = stage,
+                            httpCode = statusCode,
+                            rawMessage = responseBody,
+                            userFriendlyMessage = "Batas permintaan Gemini terlampaui (HTTP $statusCode). Silakan tunggu beberapa saat atau periksa kuota API Key Anda di menu API Key."
+                        )
                     }
                 }
 
-                throw IOException("Permintaan AI gagal (HTTP $statusCode): ${parseErrorMessage(responseBody, statusCode)}")
+                Log.e(TAG, "[$stage] Permintaan API gagal. HTTP $statusCode: $responseBody")
+                throw GeminiApiException(
+                    stage = stage,
+                    httpCode = statusCode,
+                    rawMessage = responseBody,
+                    userFriendlyMessage = parseErrorMessage(responseBody, statusCode)
+                )
 
+            } catch (e: GeminiApiException) {
+                throw e
             } catch (e: IOException) {
-                if (e.message?.contains("Batas permintaan Gemini") == true || e.message?.contains("Permintaan AI gagal") == true) {
-                    throw e
-                }
+                Log.e(TAG, "[$stage] Gangguan IO/Koneksi pada percobaan $attempt: ${e.message}", e)
                 if (attempt <= GeminiConstants.MAX_RETRIES) {
                     onStatusUpdate("Gangguan koneksi: ${e.localizedMessage}. Mencoba ulang dalam ${backoffMs / 1000} detik...")
                     delay(backoffMs)
                     backoffMs *= 2
                     continue
                 } else {
-                    throw IOException("Koneksi ke Gemini terputus: ${e.localizedMessage}. Periksa koneksi internet Anda.")
+                    throw GeminiApiException(
+                        stage = stage,
+                        httpCode = null,
+                        rawMessage = "IOException: ${e.message}\n${e.stackTraceToString()}",
+                        userFriendlyMessage = "Koneksi ke Gemini terputus: ${e.localizedMessage}. Pastikan perangkat terhubung ke internet."
+                    )
                 }
             }
         }
@@ -493,62 +624,73 @@ class GeminiApiClient(
         """.trimIndent()
     }
 
-    private fun parseSegmentOutput(rawJson: String): SegmentAnalysisOutput {
-        val json = JSONObject(rawJson)
-        val candidates = json.optJSONArray("candidates")
-        val rawText = if (candidates != null && candidates.length() > 0) {
-            val content = candidates.getJSONObject(0).optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            if (parts != null && parts.length() > 0) {
-                parts.getJSONObject(0).optString("text", "")
-            } else ""
-        } else {
-            rawJson
-        }
+    private fun parseSegmentOutput(stage: String, rawJson: String): SegmentAnalysisOutput {
+        try {
+            val json = JSONObject(rawJson)
+            val candidates = json.optJSONArray("candidates")
+            val rawText = if (candidates != null && candidates.length() > 0) {
+                val content = candidates.getJSONObject(0).optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                if (parts != null && parts.length() > 0) {
+                    parts.getJSONObject(0).optString("text", "")
+                } else ""
+            } else {
+                rawJson
+            }
 
-        val cleaned = cleanJsonString(rawText)
-        val parsed = JSONObject(cleaned)
+            val cleaned = cleanJsonString(rawText)
+            val parsed = JSONObject(cleaned)
 
-        val segmentSummary = parsed.optString("segmentSummary", "Summary of anime segment.")
+            val segmentSummary = parsed.optString("segmentSummary", "Summary of anime segment.")
 
-        val characterSheetList = mutableListOf<CharacterInfo>()
-        val charactersArray = parsed.optJSONArray("characterSheet")
-        if (charactersArray != null) {
-            for (i in 0 until charactersArray.length()) {
-                val item = charactersArray.optJSONObject(i) ?: continue
-                val name = item.optString("name", "Unknown Character")
-                val desc = item.optString("description", "")
-                if (name.isNotBlank()) {
-                    characterSheetList.add(CharacterInfo(name = name, description = desc))
+            val characterSheetList = mutableListOf<CharacterInfo>()
+            val charactersArray = parsed.optJSONArray("characterSheet")
+            if (charactersArray != null) {
+                for (i in 0 until charactersArray.length()) {
+                    val item = charactersArray.optJSONObject(i) ?: continue
+                    val name = item.optString("name", "Unknown Character")
+                    val desc = item.optString("description", "")
+                    if (name.isNotBlank()) {
+                        characterSheetList.add(CharacterInfo(name = name, description = desc))
+                    }
                 }
             }
-        }
 
-        val timelineList = mutableListOf<TimelineItem>()
-        val timelineArray = parsed.optJSONArray("timeline")
-        if (timelineArray != null) {
-            for (i in 0 until timelineArray.length()) {
-                val item = timelineArray.optJSONObject(i) ?: continue
-                val timestamp = item.optString("timestamp", "")
-                val sceneDescription = item.optString("sceneDescription", "")
-                val visualPrompt = item.optString("visualPrompt", "")
-                if (timestamp.isNotBlank() || sceneDescription.isNotBlank()) {
-                    timelineList.add(
-                        TimelineItem(
-                            timestamp = timestamp,
-                            sceneDescription = sceneDescription,
-                            visualPrompt = visualPrompt
+            val timelineList = mutableListOf<TimelineItem>()
+            val timelineArray = parsed.optJSONArray("timeline")
+            if (timelineArray != null) {
+                for (i in 0 until timelineArray.length()) {
+                    val item = timelineArray.optJSONObject(i) ?: continue
+                    val timestamp = item.optString("timestamp", "")
+                    val sceneDescription = item.optString("sceneDescription", "")
+                    val visualPrompt = item.optString("visualPrompt", "")
+                    if (timestamp.isNotBlank() || sceneDescription.isNotBlank()) {
+                        timelineList.add(
+                            TimelineItem(
+                                timestamp = timestamp,
+                                sceneDescription = sceneDescription,
+                                visualPrompt = visualPrompt
+                            )
                         )
-                    )
+                    }
                 }
             }
-        }
 
-        return SegmentAnalysisOutput(
-            segmentSummary = segmentSummary,
-            characterSheet = characterSheetList,
-            timeline = timelineList
-        )
+            return SegmentAnalysisOutput(
+                segmentSummary = segmentSummary,
+                characterSheet = characterSheetList,
+                timeline = timelineList
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[$stage] Gagal memparsing respons JSON: ${e.message}\nRespons Mentah:\n$rawJson", e)
+            throw GeminiApiException(
+                stage = stage,
+                httpCode = 200,
+                rawMessage = "Gagal memproses JSON respons: ${e.message}\nRespons Mentah:\n$rawJson",
+                userFriendlyMessage = "Format JSON hasil analisis tidak sesuai: ${e.message}",
+                cause = e
+            )
+        }
     }
 
     private fun cleanJsonString(text: String): String {
@@ -568,15 +710,16 @@ class GeminiApiClient(
             val errorObj = json.optJSONObject("error")
             val msg = errorObj?.optString("message") ?: errorBody
             when (statusCode) {
-                400 -> "Parameter tidak valid: $msg"
-                401, 403 -> "API Key tidak valid atau tidak memiliki izin akses: $msg"
+                400 -> "Parameter permintaan tidak valid: $msg"
+                401, 403 -> "API Key tidak valid atau tidak diizinkan: $msg"
                 429 -> "Batas kuota gratis Gemini terlampaui. Silakan tunggu beberapa saat."
                 503 -> "Layanan Gemini AI sedang sibuk. Silakan coba kembali."
                 else -> msg
             }
         } catch (_: Exception) {
             if (statusCode == 429) "Batas kuota gratis Gemini terlampaui."
-            else "Terjadi kendala pada server (kode $statusCode)."
+            else if (statusCode == 503) "Layanan Google AI sedang sibuk."
+            else "Terjadi kendala pada server (Kode HTTP $statusCode)."
         }
     }
 
@@ -586,10 +729,15 @@ class GeminiApiClient(
         return String.format(Locale.US, "%02d:%02d", m, s)
     }
 
-    private fun getValidApiKey(): String {
+    private fun getValidApiKey(stage: String): String {
         val key = apiKeyProvider()
         if (key.isBlank()) {
-            throw IOException("API Key Gemini belum diisi. Silakan masukkan API Key Anda di menu Pengaturan.")
+            throw GeminiApiException(
+                stage = stage,
+                httpCode = null,
+                rawMessage = "API Key kosong / belum diatur",
+                userFriendlyMessage = "API Key Gemini belum diatur. Silakan masukkan API Key Anda di menu API Key."
+            )
         }
         return key
     }

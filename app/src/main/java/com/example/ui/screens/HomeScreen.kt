@@ -48,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
@@ -57,11 +58,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -209,7 +216,7 @@ fun HomeScreen(
 
                 is AnalysisState.Error -> {
                     ErrorContent(
-                        errorMessage = state.errorMessage,
+                        errorState = state,
                         onRetry = { viewModel.startAnalysis() },
                         onOpenSettings = { viewModel.openSettings() },
                         onCancel = { viewModel.resetAnalysis() }
@@ -814,15 +821,19 @@ private fun ProgressContent(
 
 @Composable
 private fun ErrorContent(
-    errorMessage: String,
+    errorState: AnalysisState.Error,
     onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
     onCancel: () -> Unit
 ) {
+    val clipboard = LocalClipboardManager.current
+    var isCopied by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         Card(
@@ -840,12 +851,13 @@ private fun ErrorContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .verticalScroll(scrollState)
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(52.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
@@ -854,25 +866,127 @@ private fun ErrorContent(
                         imageVector = Icons.Default.ErrorOutline,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "Gagal Menganalisis Video",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
+                    fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = errorMessage,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 17.sp
-                )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
+                // Badges: Tahap Gagal & Kode HTTP
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "Tahap: ${errorState.stage}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 2
+                        )
+                    }
+
+                    if (errorState.httpCode != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "HTTP ${errorState.httpCode}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Penjelasan Error dalam Bahasa Indonesia
+                Text(
+                    text = errorState.errorMessage,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Detail Pesan Asli dari API / Server
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "Detail Pesan Asli API / Server:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = errorState.rawApiMessage.ifBlank { "Tidak ada detail respons mentah dari server." },
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 15.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Tombol "Salin Detail Error"
+                OutlinedButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(errorState.getFullReport()))
+                        isCopied = true
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("btn_copy_error_detail")
+                ) {
+                    Icon(
+                        imageVector = if (isCopied) Icons.Default.CheckCircle else Icons.Default.ContentCopy,
+                        contentDescription = null,
+                        tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isCopied) "Detail Error Berhasil Disalin!" else "Salin Detail Error",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -885,7 +999,12 @@ private fun ErrorContent(
                             .height(48.dp)
                             .testTag("btn_error_settings")
                     ) {
-                        Text("Pengaturan API", fontSize = 12.sp)
+                        Text(
+                            text = "API Key",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
                     }
                     Button(
                         onClick = onRetry,
@@ -899,7 +1018,12 @@ private fun ErrorContent(
                             .height(48.dp)
                             .testTag("btn_error_retry")
                     ) {
-                        Text("Coba Lagi", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = "Coba Lagi",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
                     }
                 }
 

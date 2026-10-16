@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.data.api.GeminiConstants
+import com.example.data.model.AnalysisState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,5 +63,21 @@ class ExampleUnitTest {
         assertEquals("03:00", format(180))
         assertEquals("06:00", format(360))
         assertEquals("25:00", format(1500))
+    }
+
+    @Test
+    fun verifyErrorReportFormatting() {
+        val error = AnalysisState.Error(
+            stage = "Analisis Segmen 2 dari 9",
+            httpCode = 429,
+            rawApiMessage = "{\"error\": {\"code\": 429, \"message\": \"RESOURCE_EXHAUSTED\"}}",
+            errorMessage = "Batas kuota gratis Gemini terlampaui."
+        )
+
+        val report = error.getFullReport()
+        assertTrue(report.contains("Tahap: Analisis Segmen 2 dari 9"))
+        assertTrue(report.contains("Kode HTTP: 429"))
+        assertTrue(report.contains("RESOURCE_EXHAUSTED"))
+        assertTrue(report.contains("Batas kuota gratis Gemini terlampaui."))
     }
 }

@@ -5,9 +5,11 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.api.GeminiApiClient
+import com.example.data.api.GeminiApiException
 import com.example.data.api.GeminiConstants
 import com.example.data.model.AnalysisState
 import com.example.data.model.AnimeAnalysisResult
@@ -25,6 +27,10 @@ import java.util.Locale
 import kotlin.math.ceil
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "RekapinVM"
+    }
 
     private val context: Context get() = getApplication()
     val apiKeyStorage = ApiKeyStorage(context)
@@ -51,11 +57,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setIntervalSeconds(seconds: Int) {
         if (seconds == 3 || seconds == 5) {
             _promptIntervalSeconds.value = seconds
+            Log.d(TAG, "Interval visual prompt diubah menjadi: $seconds detik")
         }
     }
 
     fun openSettings() {
         _isSettingsOpen.value = true
+        Log.d(TAG, "Membuka dialog pengaturan API Key")
     }
 
     fun closeSettings() {
@@ -64,14 +72,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveApiKey(newKey: String) {
         apiKeyStorage.saveApiKey(newKey)
+        Log.i(TAG, "API Key baru disimpan (panjang: ${newKey.length} karakter)")
         closeSettings()
     }
 
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
+            Log.i(TAG, "Video dipilih dari picker, URI: $uri")
             val video = loadVideoMetadata(uri)
             _selectedVideo.value = video
             _analysisState.value = AnalysisState.Idle
+            Log.i(TAG, "Metadata video berhasil dimuat: ${video.displayName}, durasi: ${video.durationFormatted}, ukuran: ${video.sizeFormatted}")
         }
     }
 
@@ -79,14 +90,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         cancelAnalysis()
         _selectedVideo.value = null
         _analysisState.value = AnalysisState.Idle
+        Log.d(TAG, "Video terpilih dibersihkan")
     }
 
     fun resetAnalysis() {
         cancelAnalysis()
         _analysisState.value = AnalysisState.Idle
+        Log.d(TAG, "Analisis di-reset kembali ke Idle")
     }
 
     fun cancelAnalysis() {
+        Log.i(TAG, "Membatalkan analisis aktif...")
         currentJob?.cancel()
         currentJob = null
         if (_analysisState.value !is AnalysisState.Success) {
@@ -96,14 +110,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startAnalysis() {
         val video = _selectedVideo.value ?: run {
-            _analysisState.value = AnalysisState.Error("Silakan pilih video anime terlebih dahulu.")
+            Log.w(TAG, "Percobaan analisis gagal: berkas video belum dipilih")
+            _analysisState.value = AnalysisState.Error(
+                stage = "Pemilihan Video",
+                httpCode = null,
+                rawApiMessage = "Berkas video belum dipilih.",
+                errorMessage = "Silakan pilih video anime terlebih dahulu."
+            )
             return
         }
 
         if (!apiKeyStorage.hasApiKey()) {
+            Log.w(TAG, "Percobaan analisis gagal: API Key belum diatur")
             _isSettingsOpen.value = true
             _analysisState.value = AnalysisState.Error(
-                "API Key Gemini belum diatur. Silakan masukkan API Key Gemini Anda di menu Pengaturan.",
+                stage = "Pemeriksaan API Key",
+                httpCode = null,
+                rawApiMessage = "Kunci API kosong pada SharedPreferences dan BuildConfig.",
+                errorMessage = "API Key Gemini belum diatur. Silakan masukkan API Key Gemini Anda di menu API Key.",
                 canRetry = true
             )
             return
@@ -111,11 +135,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         currentJob?.cancel()
         currentJob = viewModelScope.launch {
+            var currentStage = "Mempersiapkan Berkas"
             try {
                 // Tahap 1: Mempersiapkan upload
+                Log.i(TAG, "[$currentStage] Mempersiapkan upload video: ${video.displayName}")
                 _analysisState.value = AnalysisState.Preparing("Mempersiapkan pengunggahan video anime...")
 
                 // Tahap 2: Upload file sekali via File API
+                currentStage = "Upload Video ke Gemini File API"
+                Log.i(TAG, "[$currentStage] Mengunggah ${video.sizeBytes} bytes secara streaming...")
                 val uploadedFile = geminiClient.uploadVideo(
                     context = context,
                     video = video,
@@ -130,6 +158,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 // Tahap 3: Menunggu status ACTIVE
+                currentStage = "Menunggu Status Video ACTIVE"
+                Log.i(TAG, "[$currentStage] Menunggu file ${uploadedFile.name} menjadi ACTIVE...")
                 _analysisState.value = AnalysisState.PollingFileStatus(
                     "Menunggu verifikasi status video di server AI..."
                 )
@@ -138,17 +168,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Menentukan segmen 3 menit (180 detik)
-                // Standar anime 25-28 menit (~1500-1680 detik)
                 val totalSeconds = if (video.durationMs > 0) {
                     video.durationMs / 1000
                 } else {
-                    // Default fallback jika metadata durasi tidak terbaca di beberapa perangkat
                     1500L
                 }
 
                 val totalSegments = ceil(totalSeconds.toDouble() / GeminiConstants.SEGMENT_DURATION_SECONDS)
                     .toInt()
                     .coerceAtLeast(1)
+
+                Log.i(TAG, "Total durasi: $totalSeconds detik (${formatSeconds(totalSeconds)}). Dibagi menjadi $totalSegments segmen 3-menitan.")
 
                 val allCharacterSheet = mutableListOf<CharacterInfo>()
                 val allTimeline = mutableListOf<TimelineItem>()
@@ -159,7 +189,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val startSec = i * GeminiConstants.SEGMENT_DURATION_SECONDS
                     val endSec = minOf((i + 1) * GeminiConstants.SEGMENT_DURATION_SECONDS, totalSeconds)
                     val timeRange = "${formatSeconds(startSec)} - ${formatSeconds(endSec)}"
+                    currentStage = "Analisis Segmen ${i + 1} dari $totalSegments ($timeRange)"
 
+                    Log.i(TAG, "[$currentStage] Memulai analisis...")
                     _analysisState.value = AnalysisState.AnalyzingSegment(
                         currentSegment = i + 1,
                         totalSegments = totalSegments,
@@ -168,6 +200,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
 
                     val segmentOutput = geminiClient.analyzeSegment(
+                        currentSegment = i + 1,
+                        totalSegments = totalSegments,
                         fileUri = activeFile.uri,
                         mimeType = video.mimeType,
                         startSec = startSec,
@@ -203,9 +237,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     // Menambahkan item timeline berurutan
                     allTimeline.addAll(segmentOutput.timeline)
+                    Log.i(TAG, "[$currentStage] Selesai. Karakter total sekarang: ${allCharacterSheet.size}, Timeline total sekarang: ${allTimeline.size}")
                 }
 
                 // Tahap 5: Menyusun narasi rekap episode lengkap
+                currentStage = "Penyusunan Narasi Rekap Episode"
+                Log.i(TAG, "[$currentStage] Menyusun narasi episode...")
                 _analysisState.value = AnalysisState.GeneratingNarration(
                     "Menyusun narasi episode lengkap berdasarkan ringkasan ${totalSegments} segmen..."
                 )
@@ -228,13 +265,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     intervalSeconds = _promptIntervalSeconds.value
                 )
 
+                Log.i(TAG, "Analisis seluruh episode selesai dengan sukses!")
                 _analysisState.value = AnalysisState.Success(result)
 
+            } catch (e: GeminiApiException) {
+                Log.e(TAG, "GeminiApiException pada tahap [${e.stage}] (HTTP ${e.httpCode}): ${e.userFriendlyMessage}\nRaw: ${e.rawMessage}", e)
+                _analysisState.value = AnalysisState.Error(
+                    stage = e.stage,
+                    httpCode = e.httpCode,
+                    rawApiMessage = e.rawMessage,
+                    errorMessage = e.userFriendlyMessage,
+                    canRetry = true
+                )
             } catch (e: CancellationException) {
+                Log.i(TAG, "Analisis dibatalkan oleh pengguna.")
                 _analysisState.value = AnalysisState.Idle
             } catch (e: Exception) {
+                Log.e(TAG, "Kesalahan tidak terduga pada tahap [$currentStage]: ${e.message}", e)
                 _analysisState.value = AnalysisState.Error(
-                    errorMessage = e.message ?: "Terjadi kesalahan yang tidak terduga saat menganalisis video.",
+                    stage = currentStage,
+                    httpCode = null,
+                    rawApiMessage = e.stackTraceToString(),
+                    errorMessage = e.localizedMessage ?: "Terjadi kesalahan pada sistem.",
                     canRetry = true
                 )
             }
@@ -259,7 +311,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Gagal query cursor metadata video: ${e.message}")
+        }
 
         val mimeType = contentResolver.getType(uri) ?: "video/mp4"
 
@@ -270,14 +324,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             durationMs = durStr?.toLongOrNull() ?: 0L
             retriever.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+        }
 
         if (sizeBytes <= 0L) {
             try {
                 contentResolver.openInputStream(uri)?.use { stream ->
                     sizeBytes = stream.available().toLong()
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "Gagal membaca estimasi ukuran video via stream: ${e.message}")
+            }
         }
 
         return SelectedVideo(
