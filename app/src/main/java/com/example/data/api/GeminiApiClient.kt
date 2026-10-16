@@ -6,8 +6,10 @@ import com.example.data.model.CharacterInfo
 import com.example.data.model.SegmentAnalysisOutput
 import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -45,18 +47,19 @@ class GeminiApiClient(
     /**
      * Mengunggah video anime ke Gemini File API via Resumable Upload
      * dengan streaming langsung dari URI (buffer 64KB, ramah RAM kecil).
+     * Dijalankan sepenuhnya di Dispatchers.IO untuk mencegah NetworkOnMainThreadException.
      */
     suspend fun uploadVideo(
         context: Context,
         video: SelectedVideo,
         onProgress: (progressPercent: Int, bytesSent: Long, totalBytes: Long) -> Unit
-    ): UploadedFile {
+    ): UploadedFile = withContext(Dispatchers.IO) {
         val stageName = "Upload Video"
         val apiKey = getValidApiKey(stageName)
         val mimeType = if (video.mimeType.isNotBlank()) video.mimeType else "video/mp4"
 
-        Log.i(TAG, "[$stageName] Memulai pengunggahan video: ${video.displayName}")
-        Log.i(TAG, "[$stageName] Ukuran berkas: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType, URI: ${video.uri}")
+        Log.i(TAG, "[$stageName] Memulai pengunggahan video di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Berkas: ${video.displayName}, Ukuran: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType, URI: ${video.uri}")
 
         // Langkah 1: Inisialisasi Resumable Upload
         val initUrl = "${GeminiConstants.UPLOAD_ENDPOINT}?key=$apiKey"
@@ -109,13 +112,13 @@ class GeminiApiClient(
         }
 
         // Langkah 2: Unggah byte video secara streaming dari InputStream
-        // Tanpa membaca seluruh file ke dalam RAM
+        // Menggunakan buffer 64KB dan tidak pernah membaca seluruh berkas ke RAM
         val streamRequestBody = object : RequestBody() {
             override fun contentType() = (mimeType.toMediaTypeOrNull() ?: "application/octet-stream".toMediaType())
             override fun contentLength() = video.sizeBytes
 
             override fun writeTo(sink: BufferedSink) {
-                Log.d(TAG, "[$stageName] Membuka InputStream dari URI untuk streaming data...")
+                Log.d(TAG, "[$stageName] Membuka InputStream dari URI untuk streaming data di thread: ${Thread.currentThread().name}")
                 context.contentResolver.openInputStream(video.uri)?.use { inputStream ->
                     val buffer = ByteArray(64 * 1024) // 64 KB buffer hemat RAM
                     var uploaded = 0L
@@ -151,7 +154,7 @@ class GeminiApiClient(
             .post(streamRequestBody)
             .build()
 
-        return suspendCancellableCoroutine { continuation ->
+        suspendCancellableCoroutine { continuation ->
             val call = client.newCall(uploadRequest)
             continuation.invokeOnCancellation { call.cancel() }
             try {
@@ -191,17 +194,18 @@ class GeminiApiClient(
 
     /**
      * Menunggu pemrosesan berkas video di server Gemini hingga berstatus ACTIVE.
+     * Dijalankan sepenuhnya di Dispatchers.IO.
      */
     suspend fun waitForFileActive(
         fileName: String,
         onStatusUpdate: (String) -> Unit
-    ): UploadedFile {
+    ): UploadedFile = withContext(Dispatchers.IO) {
         val stageName = "Menunggu File ACTIVE"
         val apiKey = getValidApiKey(stageName)
         val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
 
-        Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName")
+        Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName di thread: ${Thread.currentThread().name}")
         var attempts = 0
         val maxAttempts = 60 // 60 x 3 detik = 3 menit batas maksimum polling
 
@@ -245,7 +249,7 @@ class GeminiApiClient(
                     "ACTIVE" -> {
                         Log.i(TAG, "[$stageName] Berkas video telah ACTIVE dan siap dianalisis!")
                         onStatusUpdate("Video siap dianalisis (Status: ACTIVE)")
-                        return fileResult
+                        return@withContext fileResult
                     }
                     "FAILED" -> {
                         Log.e(TAG, "[$stageName] Berkas video berstatus FAILED di server Google AI")
@@ -275,6 +279,7 @@ class GeminiApiClient(
 
     /**
      * Menganalisis satu segmen 3 menit memakai start/end offset pada file yang sama.
+     * Dijalankan sepenuhnya di Dispatchers.IO.
      */
     suspend fun analyzeSegment(
         currentSegment: Int,
@@ -287,13 +292,13 @@ class GeminiApiClient(
         previousCharacterSheet: List<CharacterInfo>,
         isFirstSegment: Boolean,
         onStatusUpdate: (String) -> Unit
-    ): SegmentAnalysisOutput {
+    ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
         val endFormatted = formatTimeSeconds(endSec)
         val stageName = "Analisis Segmen $currentSegment dari $totalSegments ($startFormatted - $endFormatted)"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Memulai analisis offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s")
+        Log.i(TAG, "[$stageName] Memulai analisis offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s di thread: ${Thread.currentThread().name}")
         Log.d(TAG, "[$stageName] Karakter yang telah dikenal sebelumnya: ${previousCharacterSheet.map { it.name }}")
 
         val prompt = buildSegmentPrompt(
@@ -351,22 +356,22 @@ class GeminiApiClient(
 
         val output = parseSegmentOutput(stageName, responseJsonString)
         Log.i(TAG, "[$stageName] Berhasil! Ringkasan: \"${output.segmentSummary.take(60)}...\", Karakter: ${output.characterSheet.size}, Timeline items: ${output.timeline.size}")
-        return output
+        output
     }
 
     /**
      * Membuat narasi rekap episode lengkap dari gabungan ringkasan tiap segmen.
-     * Permintaan teks saja, tanpa video.
+     * Permintaan teks saja, tanpa video. Dijalankan sepenuhnya di Dispatchers.IO.
      */
     suspend fun generateFinalNarration(
         segmentSummaries: List<String>,
         characterSheet: List<CharacterInfo>,
         onStatusUpdate: (String) -> Unit
-    ): String {
+    ): String = withContext(Dispatchers.IO) {
         val stageName = "Penyusunan Narasi Rekap Episode"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Menyusun narasi dari ${segmentSummaries.size} ringkasan segmen")
+        Log.i(TAG, "[$stageName] Menyusun narasi dari ${segmentSummaries.size} ringkasan segmen di thread: ${Thread.currentThread().name}")
 
         val summariesText = segmentSummaries.mapIndexed { idx, sum ->
             "Segment ${idx + 1}: $sum"
@@ -429,7 +434,7 @@ class GeminiApiClient(
                 if (parts != null && parts.length() > 0) {
                     val narrationText = parts.getJSONObject(0).optString("text", "").trim()
                     Log.i(TAG, "[$stageName] Narasi berhasil dibuat (${narrationText.length} karakter)")
-                    return narrationText
+                    return@withContext narrationText
                 }
             }
             throw GeminiApiException(
@@ -453,19 +458,20 @@ class GeminiApiClient(
 
     /**
      * Eksekusi request dengan jeda dan auto-retry backoff saat rate limit (429/503).
+     * Dijalankan sepenuhnya di Dispatchers.IO.
      */
     private suspend fun executeWithRetry(
         stage: String,
         url: String,
         jsonBody: String,
         onStatusUpdate: (String) -> Unit
-    ): String {
+    ): String = withContext(Dispatchers.IO) {
         var attempt = 0
         var backoffMs = 3000L
 
         while (true) {
             attempt++
-            Log.d(TAG, "[$stage] Mengirim permintaan HTTP (Percobaan $attempt)...")
+            Log.d(TAG, "[$stage] Mengirim permintaan HTTP (Percobaan $attempt) di thread: ${Thread.currentThread().name}...")
 
             val request = Request.Builder()
                 .url(url)
@@ -493,7 +499,7 @@ class GeminiApiClient(
 
                 if (statusCode in 200..299) {
                     delay(GeminiConstants.REQUEST_DELAY_MS)
-                    return responseBody
+                    return@withContext responseBody
                 }
 
                 if (statusCode == 429 || statusCode == 503) {
@@ -541,6 +547,11 @@ class GeminiApiClient(
                 }
             }
         }
+        throw GeminiApiException(
+            stage = stage,
+            rawMessage = "Perulangan tak hingga selesai tanpa hasil.",
+            userFriendlyMessage = "Gagal mendapatkan respons dari server Google AI."
+        )
     }
 
     private fun buildSegmentPrompt(

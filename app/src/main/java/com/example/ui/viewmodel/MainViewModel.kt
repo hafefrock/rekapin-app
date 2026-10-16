@@ -18,11 +18,13 @@ import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
 import com.example.data.prefs.ApiKeyStorage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.ceil
 
@@ -79,7 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
             Log.i(TAG, "Video dipilih dari picker, URI: $uri")
-            val video = loadVideoMetadata(uri)
+            val video = withContext(Dispatchers.IO) { loadVideoMetadata(uri) }
             _selectedVideo.value = video
             _analysisState.value = AnalysisState.Idle
             Log.i(TAG, "Metadata video berhasil dimuat: ${video.displayName}, durasi: ${video.durationFormatted}, ukuran: ${video.sizeFormatted}")
