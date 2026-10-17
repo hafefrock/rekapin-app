@@ -44,9 +44,19 @@ sealed interface AnalysisState {
         val canResume: Boolean = false,
         val resumeSegment: Int = 1,
         val canSkipAndFinish: Boolean = false,
-        val analysisId: Long? = null
+        val analysisId: Long? = null,
+        val isVideoAccessLost: Boolean = false,
+        val expectedDurationMs: Long = 0L,
+        val expectedSizeBytes: Long = 0L
     ) : AnalysisState {
         fun getFullReport(): String {
+            if (isVideoAccessLost) {
+                return buildString {
+                    appendLine("=== Rekapin Informasi ===")
+                    appendLine("Tahap: $stage")
+                    appendLine("Keterangan: $errorMessage")
+                }
+            }
             return buildString {
                 appendLine("=== Rekapin Error Report ===")
                 appendLine("Tahap: $stage")
@@ -55,8 +65,10 @@ sealed interface AnalysisState {
                 }
                 appendLine("Model: ${GeminiConstants.GEMINI_MODEL}")
                 appendLine("Penjelasan: $errorMessage")
-                appendLine("\nDetail Pesan Asli API / Server:")
-                appendLine(rawApiMessage)
+                if (rawApiMessage.isNotBlank()) {
+                    appendLine("\nDetail Pesan Asli API / Server:")
+                    appendLine(rawApiMessage)
+                }
             }
         }
     }

@@ -191,8 +191,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Memulai analisis baru atau melanjutkan analisis yang tertunda.
      * @param resumeId ID analisis di Room jika ingin melanjutkan dari segmen yang gagal.
+     * @param forceReupload Paksa unggah ulang berkas video ke Gemini API (misalnya setelah ganti URI).
      */
-    fun startAnalysis(resumeId: Long? = null) {
+    fun startAnalysis(resumeId: Long? = null, forceReupload: Boolean = false) {
         if (!apiKeyStorage.hasApiKey()) {
             Log.w(TAG, "Percobaan analisis gagal: API Key belum diatur")
             _isSettingsOpen.value = true
@@ -219,11 +220,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Tentukan Video yang akan dianalisis
                 var video = _selectedVideo.value
-                if (video == null && existingEntity != null) {
+
+                // Jika melanjutkan analisis tersimpan, verifikasi izin akses berkas video terlebih dahulu
+                if (existingEntity != null) {
                     val parsedUri = Uri.parse(existingEntity.videoUriString)
-                    video = withContext(Dispatchers.IO) { loadVideoMetadata(parsedUri) }
-                    _selectedVideo.value = video
-                    _promptIntervalSeconds.value = existingEntity.intervalSeconds
+                    val canAccess = withContext(Dispatchers.IO) {
+                        try {
+                            context.contentResolver.openInputStream(parsedUri)?.use { stream ->
+                                stream.read()
+                            }
+                            true
+                        } catch (_: SecurityException) {
+                            false
+                        } catch (_: java.io.FileNotFoundException) {
+                            false
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
+
+                    if (!canAccess) {
+                        Log.w(TAG, "Berkas video pada analisis ID $activeEntityId tidak bisa dibuka lagi (SecurityException / FileNotFoundException).")
+                        val resumeInfo = checkCanResume(activeEntityId)
+                        _analysisState.value = AnalysisState.Error(
+                            stage = "Akses Berkas Video",
+                            httpCode = null,
+                            rawApiMessage = "", // JANGAN tampilkan stack trace sesuai instruksi nomor 3!
+                            errorMessage = "Video tidak bisa dibuka lagi. Pilih video yang sama.",
+                            canRetry = false,
+                            canResume = false,
+                            canSkipAndFinish = resumeInfo.canSkipAndFinish || existingEntity.completedSegmentsCount > 0,
+                            analysisId = activeEntityId,
+                            isVideoAccessLost = true,
+                            expectedDurationMs = existingEntity.durationMs,
+                            expectedSizeBytes = existingEntity.videoSizeBytes
+                        )
+                        return@launch
+                    }
+
+                    if (video == null || video.uri != parsedUri) {
+                        video = withContext(Dispatchers.IO) { loadVideoMetadata(parsedUri) }
+                        _selectedVideo.value = video
+                        _promptIntervalSeconds.value = existingEntity.intervalSeconds
+                    }
                 }
 
                 if (video == null) {
@@ -248,6 +287,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
                         video.durationMs
                     }
+                }
+
+                if (actualDurationMs > 0 && video.durationMs <= 0) {
+                    video = video.copy(durationMs = actualDurationMs)
+                    _selectedVideo.value = video
                 }
 
                 val totalSeconds = if (actualDurationMs > 0) {
@@ -277,8 +321,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     allCharacterSheet.addAll(AnalysisJsonAdapter.jsonToCharacterSheet(existingEntity.characterSheetJson))
                     allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
                     segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
-                    remoteFileName = existingEntity.geminiFileRemoteName
-                    remoteFileUri = existingEntity.geminiFileUri
+                    if (!forceReupload) {
+                        remoteFileName = existingEntity.geminiFileRemoteName
+                        remoteFileUri = existingEntity.geminiFileUri
+                    }
                     activeEntityId = existingEntity.id
                     activeAnalysisId = existingEntity.id
                     Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan.")
@@ -288,7 +334,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         videoUriString = video.uri.toString(),
                         videoName = video.displayName,
                         videoSizeBytes = video.sizeBytes,
-                        durationMs = video.durationMs,
+                        durationMs = if (actualDurationMs > 0) actualDurationMs else video.durationMs,
                         mimeType = video.mimeType,
                         intervalSeconds = _promptIntervalSeconds.value,
                         totalSegments = totalSegments,
@@ -311,7 +357,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _analysisState.value = AnalysisState.Preparing("Memeriksa status video di Google AI...")
                 var needUpload = false
 
-                if (remoteFileName.isNotBlank()) {
+                if (!forceReupload && remoteFileName.isNotBlank()) {
                     val isStillActive = geminiClient.isFileStillActive(remoteFileName)
                     if (!isStillActive) {
                         Log.w(TAG, "Berkas $remoteFileName di Gemini telah kedaluwarsa atau tidak aktif. Perlu unggah ulang.")
@@ -323,7 +369,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     needUpload = true
                 }
 
-                // Jika perlu upload ulang (awal baru atau file lama expired)
+                // Jika perlu upload ulang (awal baru atau file lama expired atau forceReupload)
                 if (needUpload) {
                     currentStage = "Upload Video ke Gemini File API"
                     Log.i(TAG, "[$currentStage] Mengunggah ${video.sizeBytes} bytes secara streaming...")
@@ -505,20 +551,152 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "Analisis dibatalkan oleh pengguna.")
                 _analysisState.value = AnalysisState.Idle
             } catch (e: Exception) {
-                Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
-                val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
-                handleErrorAndSaveToDb(activeEntityId, currentStage, msg)
-                val resumeInfo = checkCanResume(activeEntityId)
+                val isAccessLost = e is SecurityException ||
+                        e is java.io.FileNotFoundException ||
+                        e.cause is SecurityException ||
+                        e.cause is java.io.FileNotFoundException ||
+                        (e.message?.contains("Permission Denial", ignoreCase = true) == true) ||
+                        (e.message?.contains("requires that you obtain", ignoreCase = true) == true)
+
+                if (isAccessLost) {
+                    Log.w(TAG, "Akses berkas video hilang (SecurityException / FileNotFoundException): ${e.message}")
+                    val resumeInfo = checkCanResume(activeEntityId)
+                    val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
+                    _analysisState.value = AnalysisState.Error(
+                        stage = "Akses Berkas Video",
+                        httpCode = null,
+                        rawApiMessage = "", // JANGAN tampilkan stack trace sesuai instruksi nomor 3!
+                        errorMessage = "Video tidak bisa dibuka lagi. Pilih video yang sama.",
+                        canRetry = false,
+                        canResume = false,
+                        canSkipAndFinish = resumeInfo.canSkipAndFinish || (savedEntity != null && savedEntity.completedSegmentsCount > 0),
+                        analysisId = activeEntityId,
+                        isVideoAccessLost = true,
+                        expectedDurationMs = savedEntity?.durationMs ?: 0L,
+                        expectedSizeBytes = savedEntity?.videoSizeBytes ?: 0L
+                    )
+                } else {
+                    Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
+                    val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
+                    handleErrorAndSaveToDb(activeEntityId, currentStage, msg)
+                    val resumeInfo = checkCanResume(activeEntityId)
+                    _analysisState.value = AnalysisState.Error(
+                        stage = currentStage,
+                        httpCode = null,
+                        rawApiMessage = e.stackTraceToString(),
+                        errorMessage = msg,
+                        canRetry = true,
+                        canResume = resumeInfo.canResume,
+                        resumeSegment = resumeInfo.resumeSegment,
+                        canSkipAndFinish = resumeInfo.canSkipAndFinish,
+                        analysisId = activeEntityId
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Memproses video yang dipilih saat pemulihan video hilang ("Video tidak bisa dibuka lagi. Pilih video yang sama.").
+     * Mencocokkan durasi dan ukuran berkas dengan data tersimpan (toleransi durasi 2 detik).
+     * Jika cocok, upload ulang lalu lanjutkan analisis dari segmen yang belum selesai.
+     * Jika tidak cocok, tampilkan peringatan bahwa itu video berbeda.
+     */
+    fun onRecoveryVideoPicked(newUri: Uri) {
+        val currentErrorState = _analysisState.value as? AnalysisState.Error
+        val targetId = currentErrorState?.analysisId ?: activeAnalysisId
+        if (targetId == null) {
+            Log.w(TAG, "onRecoveryVideoPicked: ID analisis target tidak ditemukan")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val savedEntity = repository.getAnalysisById(targetId)
+                if (savedEntity == null) {
+                    _analysisState.value = AnalysisState.Error(
+                        stage = "Verifikasi Video",
+                        httpCode = null,
+                        rawApiMessage = "",
+                        errorMessage = "Data analisis tidak ditemukan di database.",
+                        canRetry = false
+                    )
+                    return@launch
+                }
+
+                _analysisState.value = AnalysisState.Preparing("Memeriksa kesesuaian video anime yang dipilih...")
+
+                // Baca metadata berkas video yang baru dipilih
+                val newVideo = withContext(Dispatchers.IO) { loadVideoMetadata(newUri) }
+                val selectedDurationMs = newVideo.durationMs
+                val selectedSizeBytes = newVideo.sizeBytes
+                val savedDurationMs = savedEntity.durationMs
+                val savedSizeBytes = savedEntity.videoSizeBytes
+
+                Log.i(TAG, "Mencocokkan video: durasi=${selectedDurationMs}ms, ukuran=${selectedSizeBytes}bytes vs tersimpan: durasi=${savedDurationMs}ms, ukuran=${savedSizeBytes}bytes")
+
+                // 1. Cocokkan durasi dengan toleransi 2 detik (2000 ms)
+                val durationDiffMs = kotlin.math.abs(selectedDurationMs - savedDurationMs)
+                val durationMatches = if (savedDurationMs > 0 && selectedDurationMs > 0) {
+                    durationDiffMs <= 2000L
+                } else {
+                    true
+                }
+
+                // 2. Cocokkan ukuran berkas (toleransi wajar)
+                val sizeDiffBytes = kotlin.math.abs(selectedSizeBytes - savedSizeBytes)
+                val sizeMatches = if (savedSizeBytes > 0 && selectedSizeBytes > 0) {
+                    sizeDiffBytes <= 2048L || selectedSizeBytes == savedSizeBytes
+                } else {
+                    true
+                }
+
+                val isMatch = durationMatches && sizeMatches
+
+                if (!isMatch) {
+                    Log.w(TAG, "Video yang dipilih berbeda! Durasi beda: ${durationDiffMs}ms, ukuran beda: ${sizeDiffBytes}bytes")
+                    _analysisState.value = AnalysisState.Error(
+                        stage = "Verifikasi Video",
+                        httpCode = null,
+                        rawApiMessage = "", // JANGAN tampilkan stack trace!
+                        errorMessage = "Video yang Anda pilih berbeda dengan video analisis sebelumnya! Durasi (${newVideo.durationFormatted} vs ${savedEntity.formattedDuration}) atau ukuran berkas tidak cocok.\n\nSilakan pilih berkas video yang sama persis.",
+                        canRetry = false,
+                        canResume = false,
+                        canSkipAndFinish = savedEntity.completedSegmentsCount > 0,
+                        analysisId = targetId,
+                        isVideoAccessLost = true,
+                        expectedDurationMs = savedDurationMs,
+                        expectedSizeBytes = savedSizeBytes
+                    )
+                } else {
+                    Log.i(TAG, "Video cocok dengan rekaman analisis ID $targetId! Memperbarui URI dan mengunggah ulang...")
+                    val updatedEntity = savedEntity.copy(
+                        videoUriString = newUri.toString(),
+                        videoName = newVideo.displayName,
+                        videoSizeBytes = if (selectedSizeBytes > 0) selectedSizeBytes else savedSizeBytes,
+                        durationMs = if (selectedDurationMs > 0) selectedDurationMs else savedDurationMs,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    repository.update(updatedEntity)
+                    _selectedVideo.value = newVideo
+                    activeAnalysisId = targetId
+
+                    // Upload ulang lalu lanjutkan dari segmen yang belum selesai
+                    startAnalysis(resumeId = targetId, forceReupload = true)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal memproses berkas video yang dipilih: ${e.message}", e)
                 _analysisState.value = AnalysisState.Error(
-                    stage = currentStage,
+                    stage = "Verifikasi Video",
                     httpCode = null,
-                    rawApiMessage = e.stackTraceToString(),
-                    errorMessage = msg,
-                    canRetry = true,
-                    canResume = resumeInfo.canResume,
-                    resumeSegment = resumeInfo.resumeSegment,
-                    canSkipAndFinish = resumeInfo.canSkipAndFinish,
-                    analysisId = activeEntityId
+                    rawApiMessage = "",
+                    errorMessage = "Gagal membaca berkas video yang dipilih. Pastikan berkas video masih dapat diakses.",
+                    canRetry = false,
+                    canResume = false,
+                    canSkipAndFinish = true,
+                    analysisId = targetId,
+                    isVideoAccessLost = true
                 )
             }
         }

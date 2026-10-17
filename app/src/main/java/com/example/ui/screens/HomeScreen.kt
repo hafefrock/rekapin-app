@@ -101,11 +101,40 @@ fun HomeScreen(
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
     val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsState()
 
-    // Activity Result Launcher untuk memilih video dari galeri
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Activity Result Launcher untuk memilih video menggunakan OpenDocument (Storage Access Framework)
     val videoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let { viewModel.onVideoPicked(it) }
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("HomeScreen", "Gagal takePersistableUriPermission: ${e.message}")
+            }
+            viewModel.onVideoPicked(it)
+        }
+    }
+
+    // Activity Result Launcher untuk memilih video yang sama saat pemulihan video (akses hilang pada Lanjutkan)
+    val recoveryVideoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("HomeScreen", "Gagal takePersistableUriPermission: ${e.message}")
+            }
+            viewModel.onRecoveryVideoPicked(it)
+        }
     }
 
     // Tampilkan Detail Riwayat jika sedang dipilih
@@ -318,6 +347,7 @@ fun HomeScreen(
                         },
                         onResume = { resumeId -> viewModel.startAnalysis(resumeId) },
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
+                        onPickSameVideo = { recoveryVideoPickerLauncher.launch(arrayOf("video/*")) },
                         onOpenSettings = { viewModel.openSettings() },
                         onCancel = { viewModel.resetAnalysis() }
                     )
@@ -340,9 +370,7 @@ fun HomeScreen(
                         promptInterval = promptInterval,
                         historyList = historyList,
                         onSelectVideoClicked = {
-                            videoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                            )
+                            videoPickerLauncher.launch(arrayOf("video/*"))
                         },
                         onClearVideo = { viewModel.clearSelectedVideo() },
                         onIntervalChanged = { viewModel.setIntervalSeconds(it) },
@@ -1039,6 +1067,7 @@ private fun ErrorContent(
     onRetry: () -> Unit,
     onResume: (Long?) -> Unit,
     onFinishWithoutCurrentSegment: (Long?) -> Unit,
+    onPickSameVideo: () -> Unit,
     onOpenSettings: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -1079,7 +1108,7 @@ private fun ErrorContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ErrorOutline,
+                        imageVector = if (errorState.isVideoAccessLost) Icons.Default.VideoFile else Icons.Default.ErrorOutline,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(30.dp)
@@ -1087,7 +1116,7 @@ private fun ErrorContent(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Gagal Menganalisis Video",
+                    text = if (errorState.isVideoAccessLost) "Akses Video Terputus" else "Gagal Menganalisis Video",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1137,7 +1166,7 @@ private fun ErrorContent(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Penjelasan Error dalam Bahasa Indonesia
+                // Penjelasan Error dalam Bahasa Indonesia (tanpa stack trace)
                 Text(
                     text = errorState.errorMessage,
                     fontSize = 13.sp,
@@ -1145,67 +1174,12 @@ private fun ErrorContent(
                     lineHeight = 18.sp
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                // Jika akses video hilang, tampilkan pemilih berkas dan opsi selesaikan tanpa segmen
+                if (errorState.isVideoAccessLost) {
+                    Spacer(modifier = Modifier.height(18.dp))
 
-                // Detail Pesan Asli dari API / Server
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        text = "Detail Pesan Asli API / Server:",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = errorState.rawApiMessage.ifBlank { "Tidak ada detail respons mentah dari server." },
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 15.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Tombol "Salin Detail Error"
-                OutlinedButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(errorState.getFullReport()))
-                        isCopied = true
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("btn_copy_error_detail")
-                ) {
-                    Icon(
-                        imageVector = if (isCopied) Icons.Default.CheckCircle else Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isCopied) "Detail Error Berhasil Disalin!" else "Salin Detail Error",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Fitur Lanjutkan jika ada segmen yang tersimpan
-                if (errorState.canResume) {
                     Button(
-                        onClick = { onResume(errorState.analysisId) },
+                        onClick = onPickSameVideo,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -1214,106 +1188,236 @@ private fun ErrorContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
-                            .testTag("btn_resume_from_error")
+                            .testTag("btn_pick_same_video")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
+                            imageVector = Icons.Default.VideoFile,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Lanjutkan dari Segmen ${errorState.resumeSegment}",
+                            text = "Pilih Video yang Sama",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
 
-                // Tombol "Selesaikan tanpa segmen ini" jika ada segmen yang tersimpan
-                if (errorState.canSkipAndFinish) {
-                    Button(
-                        onClick = { onFinishWithoutCurrentSegment(errorState.analysisId) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                        ),
+                    if (errorState.canSkipAndFinish) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { onFinishWithoutCurrentSegment(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_skip_and_finish_error")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Selesaikan tanpa segmen ini",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = onCancel,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("btn_skip_and_finish_error")
+                            .height(44.dp)
+                            .testTag("btn_error_back")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Selesaikan tanpa segmen ini",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("Kembali ke Beranda", fontSize = 12.sp)
                     }
+
+                } else {
+                    // Tampilan Error Standar
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Detail Pesan Asli dari API / Server
+                    if (errorState.rawApiMessage.isNotBlank()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Detail Pesan Asli API / Server:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = errorState.rawApiMessage,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Tombol "Salin Detail Error"
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(errorState.getFullReport()))
+                                isCopied = true
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .testTag("btn_copy_error_detail")
+                        ) {
+                            Icon(
+                                imageVector = if (isCopied) Icons.Default.CheckCircle else Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isCopied) "Detail Error Berhasil Disalin!" else "Salin Detail Error",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Fitur Lanjutkan jika ada segmen yang tersimpan
+                    if (errorState.canResume) {
+                        Button(
+                            onClick = { onResume(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_resume_from_error")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Lanjutkan dari Segmen ${errorState.resumeSegment}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Tombol "Selesaikan tanpa segmen ini" jika ada segmen yang tersimpan
+                    if (errorState.canSkipAndFinish) {
+                        Button(
+                            onClick = { onFinishWithoutCurrentSegment(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_skip_and_finish_error")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Selesaikan tanpa segmen ini",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onOpenSettings,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("btn_error_settings")
+                        ) {
+                            Text(
+                                text = "API Key",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                        }
+                        Button(
+                            onClick = onRetry,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (errorState.canResume) MaterialTheme.colorScheme.surfaceVariant
+                                else MaterialTheme.colorScheme.primary,
+                                contentColor = if (errorState.canResume) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("btn_error_retry")
+                        ) {
+                            Text(
+                                text = "Coba Lagi",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
-                }
 
-                // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
                     OutlinedButton(
-                        onClick = onOpenSettings,
+                        onClick = onCancel,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("btn_error_settings")
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("btn_error_back")
                     ) {
-                        Text(
-                            text = "API Key",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
-                        )
+                        Text("Kembali ke Beranda", fontSize = 12.sp)
                     }
-                    Button(
-                        onClick = onRetry,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (errorState.canResume) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.primary,
-                            contentColor = if (errorState.canResume) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("btn_error_retry")
-                    ) {
-                        Text(
-                            text = "Coba Lagi",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedButton(
-                    onClick = onCancel,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("btn_error_back")
-                ) {
-                    Text("Kembali ke Beranda", fontSize = 12.sp)
                 }
             }
         }
