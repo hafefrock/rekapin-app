@@ -21,6 +21,7 @@ import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
 import com.example.data.prefs.ApiKeyStorage
 import com.example.data.repository.AnimeAnalysisRepository
+import com.example.util.SegmentCalculator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -235,16 +236,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Tentukan total detik & total segmen
-                val totalSeconds = if (video.durationMs > 0) {
-                    video.durationMs / 1000
+                // 1. Sebelum mulai, baca durasi video asli menggunakan MediaMetadataRetriever
+                val actualDurationMs = withContext(Dispatchers.IO) {
+                    try {
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(context, video.uri)
+                        val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        retriever.release()
+                        durStr?.toLongOrNull() ?: video.durationMs
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+                        video.durationMs
+                    }
+                }
+
+                val totalSeconds = if (actualDurationMs > 0) {
+                    actualDurationMs / 1000
                 } else {
                     1500L
                 }
 
-                val totalSegments = ceil(totalSeconds.toDouble() / GeminiConstants.SEGMENT_DURATION_SECONDS)
-                    .toInt()
-                    .coerceAtLeast(1)
+                // 2. Hitung segmen dengan aturan:
+                // - End offset segmen terakhir dibatasi ke durasi video sebenarnya.
+                // - Jika segmen terakhir lebih pendek dari 90 detik, gabungkan ke segmen sebelumnya.
+                val segmentSpans = SegmentCalculator.calculateSegments(totalSeconds)
+                val totalSegments = segmentSpans.size
+                Log.i(TAG, "Durasi video: ${totalSeconds}s, Total segmen: $totalSegments (rentang: ${segmentSpans.map { "${it.startSec}-${it.endSec}s" }})")
 
                 // Persiapan state data akumulasi
                 val allCharacterSheet = mutableListOf<CharacterInfo>()
@@ -354,8 +371,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Loop Analisis per segmen (mulai dari startIndex)
                 for (i in startIndex until totalSegments) {
-                    val startSec = i * GeminiConstants.SEGMENT_DURATION_SECONDS
-                    val endSec = minOf((i + 1) * GeminiConstants.SEGMENT_DURATION_SECONDS, totalSeconds)
+                    val segment = segmentSpans[i]
+                    val startSec = segment.startSec
+                    val endSec = minOf(segment.endSec, totalSeconds)
                     val timeRange = "${formatSeconds(startSec)} - ${formatSeconds(endSec)}"
                     currentStage = "Analisis Segmen ${i + 1} dari $totalSegments ($timeRange)"
 
@@ -471,15 +489,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: GeminiApiException) {
                 Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
                 handleErrorAndSaveToDb(activeEntityId, currentStage, e.userFriendlyMessage)
-                val (canResume, resumeSeg) = checkCanResume(activeEntityId)
+                val resumeInfo = checkCanResume(activeEntityId)
                 _analysisState.value = AnalysisState.Error(
                     stage = e.stage,
                     httpCode = e.httpCode,
                     rawApiMessage = e.rawMessage,
                     errorMessage = e.userFriendlyMessage,
                     canRetry = true,
-                    canResume = canResume,
-                    resumeSegment = resumeSeg,
+                    canResume = resumeInfo.canResume,
+                    resumeSegment = resumeInfo.resumeSegment,
+                    canSkipAndFinish = resumeInfo.canSkipAndFinish,
                     analysisId = activeEntityId
                 )
             } catch (e: CancellationException) {
@@ -489,16 +508,104 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
                 val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
                 handleErrorAndSaveToDb(activeEntityId, currentStage, msg)
-                val (canResume, resumeSeg) = checkCanResume(activeEntityId)
+                val resumeInfo = checkCanResume(activeEntityId)
                 _analysisState.value = AnalysisState.Error(
                     stage = currentStage,
                     httpCode = null,
                     rawApiMessage = e.stackTraceToString(),
                     errorMessage = msg,
                     canRetry = true,
-                    canResume = canResume,
-                    resumeSegment = resumeSeg,
+                    canResume = resumeInfo.canResume,
+                    resumeSegment = resumeInfo.resumeSegment,
+                    canSkipAndFinish = resumeInfo.canSkipAndFinish,
                     analysisId = activeEntityId
+                )
+            }
+        }
+    }
+
+    /**
+     * Menyelesaikan analisis tanpa segmen saat ini (misalnya saat gagal atau tertunda di segmen 9).
+     * Langsung membuat narasi akhir dari segmen yang sudah tersimpan (contoh: segmen 1-8)
+     * dan menandai analisis sebagai COMPLETED dengan catatan "segmen terakhir dilewati".
+     */
+    fun finishWithoutCurrentSegment(analysisId: Long? = null) {
+        val targetId = analysisId ?: activeAnalysisId ?: historyList.value.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }?.id
+        if (targetId == null) {
+            Log.w(TAG, "finishWithoutCurrentSegment: Target ID analisis tidak ditemukan")
+            return
+        }
+
+        currentJob?.cancel()
+        currentJob = viewModelScope.launch {
+            try {
+                val entity = repository.getAnalysisById(targetId)
+                if (entity == null) {
+                    Log.e(TAG, "finishWithoutCurrentSegment: Entri analisis ID $targetId tidak ada di database")
+                    return@launch
+                }
+
+                val summaries = AnalysisJsonAdapter.jsonToSummaries(entity.segmentSummariesJson)
+                val characterSheet = AnalysisJsonAdapter.jsonToCharacterSheet(entity.characterSheetJson)
+                val timeline = AnalysisJsonAdapter.jsonToTimeline(entity.timelineJson)
+
+                val savedCount = summaries.size.coerceAtLeast(entity.completedSegmentsCount)
+                Log.i(TAG, "Menyelesaikan analisis ID $targetId tanpa segmen berikutnya. Segmen tersimpan: $savedCount")
+
+                _analysisState.value = AnalysisState.GeneratingNarration(
+                    "Menyusun narasi rekap akhir dari $savedCount segmen yang tersimpan (segmen terakhir dilewati)..."
+                )
+
+                val rawNarration = try {
+                    geminiClient.generateFinalNarration(
+                        segmentSummaries = summaries,
+                        characterSheet = characterSheet,
+                        onStatusUpdate = { msg ->
+                            _analysisState.value = AnalysisState.GeneratingNarration(msg)
+                        }
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Gagal generate narasi via AI (${e.message}), memakai rangkuman segmen lokal.")
+                    summaries.mapIndexed { idx, s ->
+                        "Segmen ${idx + 1}: $s"
+                    }.joinToString("\n\n")
+                }
+
+                val note = "[Catatan: Segmen terakhir dilewati]\n\n"
+                val finalNarration = note + rawNarration
+
+                val updatedEntity = entity.copy(
+                    narration = finalNarration,
+                    status = "COMPLETED",
+                    lastErrorStage = "Selesai (Segmen dilewati)",
+                    lastErrorMessage = "Segmen terakhir dilewati",
+                    completedSegmentsCount = savedCount,
+                    totalSegments = savedCount,
+                    updatedAt = System.currentTimeMillis()
+                )
+                repository.update(updatedEntity)
+                activeAnalysisId = null
+                Log.i(TAG, "Analisis ID $targetId selesai tanpa segmen terakhir dan ditandai COMPLETED di Room.")
+
+                val finalResult = AnimeAnalysisResult(
+                    narration = finalNarration,
+                    characterSheet = characterSheet,
+                    timeline = timeline,
+                    totalSegments = savedCount,
+                    durationFormatted = entity.formattedDuration,
+                    intervalSeconds = entity.intervalSeconds,
+                    videoName = entity.videoName,
+                    note = "Segmen terakhir dilewati"
+                )
+                _analysisState.value = AnalysisState.Success(finalResult)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.message}", e)
+                _analysisState.value = AnalysisState.Error(
+                    stage = "Selesaikan Tanpa Segmen",
+                    httpCode = null,
+                    rawApiMessage = e.stackTraceToString(),
+                    errorMessage = "Gagal menyelesaikan analisis: ${e.localizedMessage}"
                 )
             }
         }
@@ -523,17 +630,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun checkCanResume(entityId: Long?): Pair<Boolean, Int> {
-        if (entityId == null) return Pair(false, 1)
+    data class ResumeCheckResult(
+        val canResume: Boolean,
+        val resumeSegment: Int,
+        val canSkipAndFinish: Boolean
+    )
+
+    private suspend fun checkCanResume(entityId: Long?): ResumeCheckResult {
+        if (entityId == null) return ResumeCheckResult(false, 1, false)
         return try {
             val entity = repository.getAnalysisById(entityId)
-            if (entity != null && entity.completedSegmentsCount > 0 && entity.completedSegmentsCount < entity.totalSegments) {
-                Pair(true, entity.completedSegmentsCount + 1)
+            if (entity != null && entity.completedSegmentsCount > 0 && entity.status != "COMPLETED") {
+                ResumeCheckResult(
+                    canResume = entity.completedSegmentsCount < entity.totalSegments,
+                    resumeSegment = entity.completedSegmentsCount + 1,
+                    canSkipAndFinish = true
+                )
             } else {
-                Pair(false, 1)
+                ResumeCheckResult(false, 1, false)
             }
         } catch (_: Exception) {
-            Pair(false, 1)
+            ResumeCheckResult(false, 1, false)
         }
     }
 

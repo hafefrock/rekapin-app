@@ -56,7 +56,10 @@ data class AnimeAnalysisEntity(
             totalSegments = totalSegments,
             durationFormatted = formattedDuration,
             intervalSeconds = intervalSeconds,
-            videoName = videoName
+            videoName = videoName,
+            note = if (lastErrorMessage == "Segmen terakhir dilewati" || lastErrorStage.contains("dilewati", ignoreCase = true)) {
+                "Segmen terakhir dilewati"
+            } else ""
         )
     }
 }

@@ -65,7 +65,8 @@ fun HistoryScreen(
     onBack: () -> Unit,
     onSelectAnalysis: (AnimeAnalysisEntity) -> Unit,
     onDeleteAnalysis: (Long) -> Unit,
-    onResumeAnalysis: (Long) -> Unit
+    onResumeAnalysis: (Long) -> Unit,
+    onFinishWithoutCurrentSegment: ((Long) -> Unit)? = null
 ) {
     BackHandler { onBack() }
     var itemToDelete by remember { mutableStateOf<AnimeAnalysisEntity?>(null) }
@@ -386,7 +387,8 @@ private fun HistoryItemCard(
 fun HistoryDetailScreen(
     entity: AnimeAnalysisEntity,
     onBack: () -> Unit,
-    onResume: () -> Unit
+    onResume: () -> Unit,
+    onFinishWithoutCurrentSegment: (() -> Unit)? = null
 ) {
     BackHandler { onBack() }
     Scaffold(
@@ -419,6 +421,21 @@ fun HistoryDetailScreen(
                 },
                 actions = {
                     if (!entity.isCompleted) {
+                        if (entity.completedSegmentsCount > 0 && onFinishWithoutCurrentSegment != null) {
+                            OutlinedButton(
+                                onClick = onFinishWithoutCurrentSegment,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .padding(end = 6.dp)
+                                    .height(36.dp)
+                            ) {
+                                Text(
+                                    text = "Selesaikan",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                         Button(
                             onClick = onResume,
                             colors = ButtonDefaults.buttonColors(

@@ -502,7 +502,9 @@ class GeminiApiClient(
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         var attempt = 0
-        var backoffMs = 3000L
+        // Jeda bertahap: 10, 30, 60 detik untuk HTTP 500 / 503 (dan 429)
+        val retryDelaysMs = listOf(10_000L, 30_000L, 60_000L)
+        val maxRetries = 3
 
         while (true) {
             attempt++
@@ -537,20 +539,34 @@ class GeminiApiClient(
                     return@withContext responseBody
                 }
 
-                if (statusCode == 429 || statusCode == 503) {
-                    if (attempt <= GeminiConstants.MAX_RETRIES) {
-                        Log.w(TAG, "[$stage] Terkena rate limit HTTP $statusCode. Auto-retry dalam ${backoffMs / 1000}s (Percobaan $attempt dari ${GeminiConstants.MAX_RETRIES})")
-                        onStatusUpdate("Mencapai batas kuota sementara (HTTP $statusCode). Mencoba ulang otomatis dalam ${backoffMs / 1000} detik ($attempt/${GeminiConstants.MAX_RETRIES})...")
-                        delay(backoffMs)
-                        backoffMs *= 2
+                // HTTP 500 diperlakukan seperti 503 (dan 429 rate limit):
+                // retry otomatis maksimal 3 kali dengan jeda bertahap (10, 30, 60 detik)
+                if (statusCode == 500 || statusCode == 503 || statusCode == 429) {
+                    if (attempt <= maxRetries) {
+                        val waitMs = retryDelaysMs[attempt - 1]
+                        val waitSec = (waitMs / 1000).toInt()
+                        Log.w(TAG, "[$stage] Server merespons HTTP $statusCode. Auto-retry dalam ${waitSec}s (Percobaan $attempt dari $maxRetries)")
+                        for (sec in waitSec downTo 1) {
+                            val statusText = if (statusCode == 500 || statusCode == 503) {
+                                "Server Google AI sibuk / kendala internal (HTTP $statusCode). Mencoba ulang otomatis dalam $sec detik ($attempt/$maxRetries)..."
+                            } else {
+                                "Mencapai batas kuota sementara (HTTP $statusCode). Mencoba ulang otomatis dalam $sec detik ($attempt/$maxRetries)..."
+                            }
+                            onStatusUpdate(statusText)
+                            delay(1000L)
+                        }
                         continue
                     } else {
-                        Log.e(TAG, "[$stage] Percobaan maksimum habis. HTTP $statusCode: $responseBody")
+                        Log.e(TAG, "[$stage] Auto-retry maksimal ($maxRetries kali) habis setelah HTTP $statusCode: $responseBody")
                         throw GeminiApiException(
                             stage = stage,
                             httpCode = statusCode,
                             rawMessage = responseBody,
-                            userFriendlyMessage = "Batas permintaan Gemini terlampaui (HTTP $statusCode). Silakan tunggu beberapa saat atau periksa kuota API Key Anda di menu API Key."
+                            userFriendlyMessage = if (statusCode == 500 || statusCode == 503) {
+                                "Server Google AI mengalami gangguan sementara (HTTP $statusCode). Silakan coba lagi atau selesaikan tanpa segmen ini."
+                            } else {
+                                "Batas permintaan Gemini terlampaui (HTTP $statusCode). Silakan tunggu beberapa saat atau periksa kuota API Key Anda di menu API Key."
+                            }
                         )
                     }
                 }
@@ -567,10 +583,13 @@ class GeminiApiClient(
                 throw e
             } catch (e: IOException) {
                 Log.e(TAG, "[$stage] Gangguan IO/Koneksi pada percobaan $attempt: ${e.message}", e)
-                if (attempt <= GeminiConstants.MAX_RETRIES) {
-                    onStatusUpdate("Gangguan koneksi: ${e.localizedMessage}. Mencoba ulang dalam ${backoffMs / 1000} detik...")
-                    delay(backoffMs)
-                    backoffMs *= 2
+                if (attempt <= maxRetries) {
+                    val waitMs = retryDelaysMs[attempt - 1]
+                    val waitSec = (waitMs / 1000).toInt()
+                    for (sec in waitSec downTo 1) {
+                        onStatusUpdate("Gangguan koneksi internet (${e.localizedMessage ?: "timeout"}). Mencoba ulang dalam $sec detik ($attempt/$maxRetries)...")
+                        delay(1000L)
+                    }
                     continue
                 } else {
                     throw GeminiApiException(

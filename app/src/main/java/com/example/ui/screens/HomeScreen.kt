@@ -116,6 +116,11 @@ fun HomeScreen(
             onResume = {
                 viewModel.startAnalysis(historyEntity.id)
                 viewModel.closeHistory()
+            },
+            onFinishWithoutCurrentSegment = {
+                viewModel.finishWithoutCurrentSegment(historyEntity.id)
+                viewModel.closeHistoryDetail()
+                viewModel.closeHistory()
             }
         )
         return
@@ -130,6 +135,10 @@ fun HomeScreen(
             onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
             onResumeAnalysis = { resumeId ->
                 viewModel.startAnalysis(resumeId)
+                viewModel.closeHistory()
+            },
+            onFinishWithoutCurrentSegment = { resumeId ->
+                viewModel.finishWithoutCurrentSegment(resumeId)
                 viewModel.closeHistory()
             }
         )
@@ -300,8 +309,15 @@ fun HomeScreen(
                 is AnalysisState.Error -> {
                     ErrorContent(
                         errorState = state,
-                        onRetry = { viewModel.startAnalysis() },
+                        onRetry = {
+                            if (state.canResume && state.analysisId != null) {
+                                viewModel.startAnalysis(state.analysisId)
+                            } else {
+                                viewModel.startAnalysis()
+                            }
+                        },
                         onResume = { resumeId -> viewModel.startAnalysis(resumeId) },
+                        onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
                         onOpenSettings = { viewModel.openSettings() },
                         onCancel = { viewModel.resetAnalysis() }
                     )
@@ -332,6 +348,7 @@ fun HomeScreen(
                         onIntervalChanged = { viewModel.setIntervalSeconds(it) },
                         onStartAnalysis = { viewModel.startAnalysis() },
                         onResumeAnalysis = { resumeId -> viewModel.startAnalysis(resumeId) },
+                        onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
                         onOpenSettings = { viewModel.openSettings() },
                         onOpenHistory = { viewModel.openHistory() },
                         hasApiKey = viewModel.apiKeyStorage.hasApiKey()
@@ -360,6 +377,7 @@ private fun IdleSetupContent(
     onIntervalChanged: (Int) -> Unit,
     onStartAnalysis: () -> Unit,
     onResumeAnalysis: (Long) -> Unit,
+    onFinishWithoutCurrentSegment: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
     hasApiKey: Boolean
@@ -448,6 +466,30 @@ private fun IdleSetupContent(
                         Text(
                             text = "Lanjutkan dari Segmen ${pendingAnalysis.completedSegmentsCount + 1}",
                             fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { onFinishWithoutCurrentSegment(pendingAnalysis.id) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("btn_finish_without_segment_home")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Selesaikan tanpa segmen ini",
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp
                         )
                     }
@@ -996,6 +1038,7 @@ private fun ErrorContent(
     errorState: AnalysisState.Error,
     onRetry: () -> Unit,
     onResume: (Long?) -> Unit,
+    onFinishWithoutCurrentSegment: (Long?) -> Unit,
     onOpenSettings: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -1188,6 +1231,35 @@ private fun ErrorContent(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
+                // Tombol "Selesaikan tanpa segmen ini" jika ada segmen yang tersimpan
+                if (errorState.canSkipAndFinish) {
+                    Button(
+                        onClick = { onFinishWithoutCurrentSegment(errorState.analysisId) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_skip_and_finish_error")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Selesaikan tanpa segmen ini",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
                 // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1223,7 +1295,7 @@ private fun ErrorContent(
                             .testTag("btn_error_retry")
                     ) {
                         Text(
-                            text = "Ulangi",
+                            text = "Coba Lagi",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             maxLines = 1

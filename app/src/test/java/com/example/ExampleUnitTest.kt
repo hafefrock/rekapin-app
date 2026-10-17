@@ -151,4 +151,69 @@ class ExampleUnitTest {
         val visualPrompts = com.example.ui.components.ExportFormatters.formatAllVisualPromptsOnly(result.timeline)
         assertTrue(visualPrompts.contains("Taro standing on rooftop"))
     }
+
+    @Test
+    fun testSegmentCalculator_mergesLastSegmentWhenUnder90Seconds() {
+        // Durasi 1500 detik (25 menit pas):
+        // 1500 / 180 = 8 segmen penuh (1440s), sisa 60s (< 90s).
+        // Sisa 60s harus digabung ke segmen 8 (1260s - 1500s), total segmen = 8
+        val segments25Min = com.example.util.SegmentCalculator.calculateSegments(1500L)
+        assertEquals(8, segments25Min.size)
+        assertEquals(0L, segments25Min.first().startSec)
+        assertEquals(180L, segments25Min.first().endSec)
+        assertEquals(1260L, segments25Min.last().startSec)
+        assertEquals(1500L, segments25Min.last().endSec)
+        assertEquals(240L, segments25Min.last().durationSec)
+        // End offset segmen terakhir tidak boleh melebihi durasi sebenarnya
+        assertTrue(segments25Min.last().endSec <= 1500L)
+
+        // Durasi 1550 detik:
+        // Sisa setelah 1440s adalah 110s (>= 90s).
+        // Maka segmen 9 berdiri sendiri (1440s - 1550s, 110s). Total = 9
+        val segmentsWith9th = com.example.util.SegmentCalculator.calculateSegments(1550L)
+        assertEquals(9, segmentsWith9th.size)
+        assertEquals(1440L, segmentsWith9th.last().startSec)
+        assertEquals(1550L, segmentsWith9th.last().endSec)
+        assertEquals(110L, segmentsWith9th.last().durationSec)
+
+        // Video pendek 70 detik (< 90s)
+        val shortVideo = com.example.util.SegmentCalculator.calculateSegments(70L)
+        assertEquals(1, shortVideo.size)
+        assertEquals(0L, shortVideo[0].startSec)
+        assertEquals(70L, shortVideo[0].endSec)
+
+        // Video 200 detik: segmen 1 (180s), sisa 20s (< 90s) digabung -> 1 segmen (0-200s)
+        val mergedVideo = com.example.util.SegmentCalculator.calculateSegments(200L)
+        assertEquals(1, mergedVideo.size)
+        assertEquals(0L, mergedVideo[0].startSec)
+        assertEquals(200L, mergedVideo[0].endSec)
+    }
+
+    @Test
+    fun testSkippedLastSegmentNote() {
+        val entity = AnimeAnalysisEntity(
+            id = 2L,
+            videoUriString = "content://media/2",
+            videoName = "Episode 09.mp4",
+            videoSizeBytes = 50_000_000L,
+            durationMs = 1500_000L,
+            mimeType = "video/mp4",
+            intervalSeconds = 3,
+            totalSegments = 8,
+            completedSegmentsCount = 8,
+            geminiFileRemoteName = "files/test999",
+            geminiFileUri = "https://generativelanguage.googleapis.com/v1beta/files/test999",
+            status = "COMPLETED",
+            characterSheetJson = "[]",
+            timelineJson = "[]",
+            segmentSummariesJson = "[\"Summary\"]",
+            narration = "[Catatan: Segmen terakhir dilewati]\n\nRecap",
+            lastErrorStage = "Selesai (Segmen dilewati)",
+            lastErrorMessage = "Segmen terakhir dilewati"
+        )
+
+        val result = entity.toAnimeAnalysisResult()
+        assertEquals("Segmen terakhir dilewati", result.note)
+        assertTrue(result.narration.contains("Segmen terakhir dilewati"))
+    }
 }

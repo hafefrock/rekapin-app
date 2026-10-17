@@ -43,6 +43,7 @@ sealed interface AnalysisState {
         val canRetry: Boolean = true,
         val canResume: Boolean = false,
         val resumeSegment: Int = 1,
+        val canSkipAndFinish: Boolean = false,
         val analysisId: Long? = null
     ) : AnalysisState {
         fun getFullReport(): String {
