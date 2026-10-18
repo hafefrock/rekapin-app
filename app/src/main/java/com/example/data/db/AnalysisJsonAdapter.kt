@@ -90,4 +90,35 @@ object AnalysisJsonAdapter {
         } catch (_: Exception) {}
         return result
     }
+
+    fun segmentPlanToJson(spans: List<com.example.util.SegmentSpan>): String {
+        val array = JSONArray()
+        spans.forEach { span ->
+            val obj = JSONObject().apply {
+                put("segmentIndex", span.segmentIndex)
+                put("startSec", span.startSec)
+                put("endSec", span.endSec)
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    fun jsonToSegmentPlan(jsonStr: String): List<com.example.util.SegmentSpan> {
+        if (jsonStr.isBlank()) return emptyList()
+        val result = mutableListOf<com.example.util.SegmentSpan>()
+        try {
+            val array = JSONArray(jsonStr)
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val idx = obj.optInt("segmentIndex", i + 1)
+                val start = obj.optLong("startSec", 0L)
+                val end = obj.optLong("endSec", 0L)
+                if (end > start) {
+                    result.add(com.example.util.SegmentSpan(segmentIndex = idx, startSec = start, endSec = end))
+                }
+            }
+        } catch (_: Exception) {}
+        return result
+    }
 }

@@ -476,7 +476,7 @@ private fun NarrationSection(
     ) {
         item {
             SectionHeader(
-                stepLabel = "a. Narasi Episode",
+                stepLabel = "a. Narasi Video",
                 subtitle = "Rekap alur cerita bergaya narator, mengalir dan emosional",
                 onCopy = onCopyNarration,
                 copyLabel = "Salin"
@@ -714,7 +714,7 @@ private fun NarrationCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Episode Narrative Recap",
+                        text = "Video Narrative Recap",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface

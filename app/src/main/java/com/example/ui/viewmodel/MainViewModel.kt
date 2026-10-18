@@ -22,6 +22,8 @@ import com.example.data.model.TimelineItem
 import com.example.data.prefs.ApiKeyStorage
 import com.example.data.repository.AnimeAnalysisRepository
 import com.example.util.SegmentCalculator
+import com.example.util.SegmentDurationOption
+import com.example.util.SegmentPlanSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +68,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _promptIntervalSeconds = MutableStateFlow(5)
     val promptIntervalSeconds: StateFlow<Int> = _promptIntervalSeconds.asStateFlow()
 
+    // Pilihan panjang segmen: Otomatis (default), 3 menit, 5 menit
+    private val _segmentDurationOption = MutableStateFlow(SegmentDurationOption.AUTO)
+    val segmentDurationOption: StateFlow<SegmentDurationOption> = _segmentDurationOption.asStateFlow()
+
+    // Ringkasan rencana segmen sebelum analisis dimulai
+    private val _segmentPlanSummary = MutableStateFlow<SegmentPlanSummary?>(null)
+    val segmentPlanSummary: StateFlow<SegmentPlanSummary?> = _segmentPlanSummary.asStateFlow()
+
+    // Dialog konfirmasi jika video yang dipilih cocok dengan analisis yang belum selesai
+    data class PendingMatchDialogState(
+        val entity: AnimeAnalysisEntity,
+        val newVideo: SelectedVideo
+    )
+
+    private val _pendingMatchDialogState = MutableStateFlow<PendingMatchDialogState?>(null)
+    val pendingMatchDialogState: StateFlow<PendingMatchDialogState?> = _pendingMatchDialogState.asStateFlow()
+
     private val _analysisState = MutableStateFlow<AnalysisState>(AnalysisState.Idle)
     val analysisState: StateFlow<AnalysisState> = _analysisState.asStateFlow()
 
@@ -87,6 +107,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (seconds == 3 || seconds == 5) {
             _promptIntervalSeconds.value = seconds
             Log.d(TAG, "Interval visual prompt diubah menjadi: $seconds detik")
+            updatePlanSummary()
+        }
+    }
+
+    fun setSegmentDurationOption(option: SegmentDurationOption) {
+        _segmentDurationOption.value = option
+        Log.d(TAG, "Panjang segmen diubah menjadi: ${option.label}")
+        updatePlanSummary()
+    }
+
+    private fun updatePlanSummary() {
+        val video = _selectedVideo.value
+        if (video != null) {
+            val totalSeconds = if (video.durationMs > 0) video.durationMs / 1000 else 1500L
+            _segmentPlanSummary.value = SegmentCalculator.calculatePlanSummary(
+                totalSeconds = totalSeconds,
+                option = _segmentDurationOption.value,
+                intervalSeconds = _promptIntervalSeconds.value
+            )
+        } else {
+            _segmentPlanSummary.value = null
         }
     }
 
@@ -136,14 +177,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         closeSettings()
     }
 
+    /**
+     * Memproses video yang dipilih: membaca metadata dengan MediaMetadataRetriever tanpa memanggil Gemini.
+     * Jika cocok dengan analisis yang belum selesai (durasi & ukuran sama), tampilkan dialog pilihan:
+     * "Lanjutkan analisis lama" atau "Mulai baru".
+     */
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
             Log.i(TAG, "Video dipilih dari picker, URI: $uri")
             val video = withContext(Dispatchers.IO) { loadVideoMetadata(uri) }
-            _selectedVideo.value = video
-            _analysisState.value = AnalysisState.Idle
             Log.i(TAG, "Metadata video berhasil dimuat: ${video.displayName}, durasi: ${video.durationFormatted}, ukuran: ${video.sizeFormatted}")
+
+            // Cek apakah video ini cocok dengan analisis yang belum selesai di Room database
+            val pendingList = try {
+                repository.allAnalyses.first()
+            } catch (_: Exception) {
+                historyList.value
+            }
+
+            val matchedEntity = pendingList.firstOrNull { entity ->
+                !entity.isCompleted && entity.completedSegmentsCount > 0 &&
+                        isSameVideo(video.durationMs, video.sizeBytes, entity.durationMs, entity.videoSizeBytes)
+            }
+
+            if (matchedEntity != null) {
+                Log.i(TAG, "Ditemukan analisis yang belum selesai untuk video ini (ID: ${matchedEntity.id}, tersimpan ${matchedEntity.completedSegmentsCount}/${matchedEntity.totalSegments} segmen). Menampilkan pilihan ke pengguna.")
+                _pendingMatchDialogState.value = PendingMatchDialogState(matchedEntity, video)
+            } else {
+                _selectedVideo.value = video
+                _analysisState.value = AnalysisState.Idle
+                updatePlanSummary()
+            }
         }
+    }
+
+    private fun isSameVideo(
+        dur1: Long,
+        size1: Long,
+        dur2: Long,
+        size2: Long
+    ): Boolean {
+        val durationMatches = if (dur1 > 0 && dur2 > 0) {
+            kotlin.math.abs(dur1 - dur2) <= 2000L // toleransi 2 detik
+        } else {
+            true
+        }
+        val sizeMatches = if (size1 > 0 && size2 > 0) {
+            kotlin.math.abs(size1 - size2) <= 2048L || size1 == size2
+        } else {
+            true
+        }
+        return durationMatches && sizeMatches
+    }
+
+    fun resumeMatchedAnalysis() {
+        val matchState = _pendingMatchDialogState.value ?: return
+        _pendingMatchDialogState.value = null
+        _selectedVideo.value = matchState.newVideo
+        updatePlanSummary()
+        startAnalysis(matchState.entity.id)
+    }
+
+    fun startFreshAnalysisWithVideo() {
+        val matchState = _pendingMatchDialogState.value ?: return
+        _pendingMatchDialogState.value = null
+        _selectedVideo.value = matchState.newVideo
+        activeAnalysisId = null
+        _analysisState.value = AnalysisState.Idle
+        updatePlanSummary()
+    }
+
+    fun dismissPendingMatchDialog() {
+        _pendingMatchDialogState.value = null
     }
 
     fun clearSelectedVideo() {
@@ -151,6 +256,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedVideo.value = null
         activeAnalysisId = null
         _analysisState.value = AnalysisState.Idle
+        updatePlanSummary()
         Log.d(TAG, "Video terpilih dibersihkan")
     }
 
@@ -158,6 +264,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         cancelAnalysis()
         activeAnalysisId = null
         _analysisState.value = AnalysisState.Idle
+        updatePlanSummary()
         Log.d(TAG, "Analisis di-reset kembali ke Idle")
     }
 
@@ -300,10 +407,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     1500L
                 }
 
-                // 2. Hitung segmen dengan aturan:
-                // - End offset segmen terakhir dibatasi ke durasi video sebenarnya.
-                // - Jika segmen terakhir lebih pendek dari 90 detik, gabungkan ke segmen sebelumnya.
-                val segmentSpans = SegmentCalculator.calculateSegments(totalSeconds)
+                // 2. Tentukan Rencana Segmen:
+                // - Jika melanjutkan analisis dari database, PAKAI RENCANA TERSIMPAN (jangan hitung ulang!)
+                // - Jika analisis baru, hitung berdasarkan durasi asli dan opsi panjang segmen terpilih
+                val segmentSpans = if (existingEntity != null) {
+                    val savedSpans = AnalysisJsonAdapter.jsonToSegmentPlan(existingEntity.segmentPlanJson)
+                    if (savedSpans.isNotEmpty()) {
+                        Log.i(TAG, "Menggunakan rencana segmen tersimpan dari database (${savedSpans.size} segmen). Tidak menghitung ulang.")
+                        savedSpans
+                    } else {
+                        val opt = try {
+                            SegmentDurationOption.valueOf(existingEntity.segmentDurationMode)
+                        } catch (_: Exception) {
+                            _segmentDurationOption.value
+                        }
+                        SegmentCalculator.calculateSegments(totalSeconds, opt)
+                    }
+                } else {
+                    SegmentCalculator.calculateSegments(totalSeconds, _segmentDurationOption.value)
+                }
+
                 val totalSegments = segmentSpans.size
                 Log.i(TAG, "Durasi video: ${totalSeconds}s, Total segmen: $totalSegments (rentang: ${segmentSpans.map { "${it.startSec}-${it.endSec}s" }})")
 
@@ -316,20 +439,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 var remoteFileUri = ""
 
                 // Jika Melanjutkan dari database
-                if (existingEntity != null && existingEntity.completedSegmentsCount > 0 && existingEntity.completedSegmentsCount < totalSegments) {
-                    startIndex = existingEntity.completedSegmentsCount
-                    allCharacterSheet.addAll(AnalysisJsonAdapter.jsonToCharacterSheet(existingEntity.characterSheetJson))
-                    allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
-                    segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
-                    if (!forceReupload) {
-                        remoteFileName = existingEntity.geminiFileRemoteName
-                        remoteFileUri = existingEntity.geminiFileUri
-                    }
+                if (existingEntity != null) {
                     activeEntityId = existingEntity.id
                     activeAnalysisId = existingEntity.id
-                    Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan.")
-                } else if (existingEntity == null) {
-                    // Buat rekaman awal baru di Room database
+                    if (existingEntity.completedSegmentsCount > 0 && existingEntity.completedSegmentsCount < totalSegments) {
+                        startIndex = existingEntity.completedSegmentsCount
+                        allCharacterSheet.addAll(AnalysisJsonAdapter.jsonToCharacterSheet(existingEntity.characterSheetJson))
+                        allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
+                        segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
+                        if (!forceReupload) {
+                            remoteFileName = existingEntity.geminiFileRemoteName
+                            remoteFileUri = existingEntity.geminiFileUri
+                        }
+                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan.")
+                    }
+                } else {
+                    // Buat rekaman awal baru di Room database dengan rencana segmen tersimpan
                     val newEntity = AnimeAnalysisEntity(
                         videoUriString = video.uri.toString(),
                         videoName = video.displayName,
@@ -345,11 +470,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         characterSheetJson = "[]",
                         timelineJson = "[]",
                         segmentSummariesJson = "[]",
-                        narration = ""
+                        narration = "",
+                        segmentPlanJson = AnalysisJsonAdapter.segmentPlanToJson(segmentSpans),
+                        segmentDurationMode = _segmentDurationOption.value.name
                     )
                     activeEntityId = repository.insert(newEntity)
                     activeAnalysisId = activeEntityId
-                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId")
+                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId dengan rencana $totalSegments segmen")
                 }
 
                 // Validasi File di Gemini API: Cek apakah masih ACTIVE
@@ -415,7 +542,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Loop Analisis per segmen (mulai dari startIndex)
+                // Loop Analisis per segmen (mulai dari startIndex - segmen tersimpan TIDAK dianalisis ulang)
                 for (i in startIndex until totalSegments) {
                     val segment = segmentSpans[i]
                     val startSec = segment.startSec
@@ -487,11 +614,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Tahap Akhir: Menyusun Narasi Lengkap Episode
-                currentStage = "Penyusunan Narasi Rekap Episode"
-                Log.i(TAG, "[$currentStage] Menyusun narasi episode...")
+                // Tahap Akhir: Menyusun Narasi Lengkap Video
+                currentStage = "Penyusunan Narasi Rekap Video"
+                Log.i(TAG, "[$currentStage] Menyusun narasi video...")
                 _analysisState.value = AnalysisState.GeneratingNarration(
-                    "Menyusun narasi episode lengkap berdasarkan ringkasan $totalSegments segmen..."
+                    "Menyusun narasi video lengkap berdasarkan ringkasan $totalSegments segmen..."
                 )
 
                 val narration = geminiClient.generateFinalNarration(
@@ -529,23 +656,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     videoName = video.displayName
                 )
 
-                Log.i(TAG, "Analisis seluruh episode selesai dengan sukses!")
+                Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
                 _analysisState.value = AnalysisState.Success(finalResult)
 
             } catch (e: GeminiApiException) {
                 Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
                 handleErrorAndSaveToDb(activeEntityId, currentStage, e.userFriendlyMessage)
                 val resumeInfo = checkCanResume(activeEntityId)
+                val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
+                val savedSummaries = if (savedEntity != null) {
+                    AnalysisJsonAdapter.jsonToSummaries(savedEntity.segmentSummariesJson)
+                } else emptyList()
+
                 _analysisState.value = AnalysisState.Error(
                     stage = e.stage,
                     httpCode = e.httpCode,
                     rawApiMessage = e.rawMessage,
                     errorMessage = e.userFriendlyMessage,
-                    canRetry = true,
-                    canResume = resumeInfo.canResume,
+                    canRetry = !e.isDailyQuota,
+                    canResume = if (e.isDailyQuota) true else resumeInfo.canResume,
                     resumeSegment = resumeInfo.resumeSegment,
                     canSkipAndFinish = resumeInfo.canSkipAndFinish,
-                    analysisId = activeEntityId
+                    analysisId = activeEntityId,
+                    isDailyQuota = e.isDailyQuota,
+                    retryDelaySeconds = e.retryDelaySeconds,
+                    completedSegmentsCount = savedEntity?.completedSegmentsCount ?: 0,
+                    totalSegments = savedEntity?.totalSegments ?: 0,
+                    completedSummaries = savedSummaries
                 )
             } catch (e: CancellationException) {
                 Log.i(TAG, "Analisis dibatalkan oleh pengguna.")
@@ -580,6 +717,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
                     handleErrorAndSaveToDb(activeEntityId, currentStage, msg)
                     val resumeInfo = checkCanResume(activeEntityId)
+                    val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
+                    val savedSummaries = if (savedEntity != null) {
+                        AnalysisJsonAdapter.jsonToSummaries(savedEntity.segmentSummariesJson)
+                    } else emptyList()
+
                     _analysisState.value = AnalysisState.Error(
                         stage = currentStage,
                         httpCode = null,
@@ -589,7 +731,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         canResume = resumeInfo.canResume,
                         resumeSegment = resumeInfo.resumeSegment,
                         canSkipAndFinish = resumeInfo.canSkipAndFinish,
-                        analysisId = activeEntityId
+                        analysisId = activeEntityId,
+                        completedSegmentsCount = savedEntity?.completedSegmentsCount ?: 0,
+                        totalSegments = savedEntity?.totalSegments ?: 0,
+                        completedSummaries = savedSummaries
                     )
                 }
             }

@@ -12,8 +12,8 @@ object GeminiConstants {
     // Rentang analisis per segmen video: 3 menit (180 detik)
     const val SEGMENT_DURATION_SECONDS = 180L
 
-    // Jeda antar request (ms) untuk menghindari rate limit free tier
-    const val REQUEST_DELAY_MS = 2500L
+    // Jeda minimal antar request (ms) untuk menghindari rate limit free tier (minimal 12 detik)
+    const val REQUEST_DELAY_MS = 12000L
 
     // Maksimal percobaan otomatis dengan exponential backoff saat limit 429 / 503
     const val MAX_RETRIES = 3

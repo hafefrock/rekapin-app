@@ -154,10 +154,10 @@ class ExampleUnitTest {
 
     @Test
     fun testSegmentCalculator_mergesLastSegmentWhenUnder90Seconds() {
-        // Durasi 1500 detik (25 menit pas):
+        // Durasi 1500 detik (25 menit pas) dengan opsi 3 menit:
         // 1500 / 180 = 8 segmen penuh (1440s), sisa 60s (< 90s).
         // Sisa 60s harus digabung ke segmen 8 (1260s - 1500s), total segmen = 8
-        val segments25Min = com.example.util.SegmentCalculator.calculateSegments(1500L)
+        val segments25Min = com.example.util.SegmentCalculator.calculateSegments(1500L, com.example.util.SegmentDurationOption.THREE_MIN)
         assertEquals(8, segments25Min.size)
         assertEquals(0L, segments25Min.first().startSec)
         assertEquals(180L, segments25Min.first().endSec)
@@ -167,10 +167,10 @@ class ExampleUnitTest {
         // End offset segmen terakhir tidak boleh melebihi durasi sebenarnya
         assertTrue(segments25Min.last().endSec <= 1500L)
 
-        // Durasi 1550 detik:
+        // Durasi 1550 detik dengan opsi 3 menit:
         // Sisa setelah 1440s adalah 110s (>= 90s).
         // Maka segmen 9 berdiri sendiri (1440s - 1550s, 110s). Total = 9
-        val segmentsWith9th = com.example.util.SegmentCalculator.calculateSegments(1550L)
+        val segmentsWith9th = com.example.util.SegmentCalculator.calculateSegments(1550L, com.example.util.SegmentDurationOption.THREE_MIN)
         assertEquals(9, segmentsWith9th.size)
         assertEquals(1440L, segmentsWith9th.last().startSec)
         assertEquals(1550L, segmentsWith9th.last().endSec)
@@ -194,7 +194,7 @@ class ExampleUnitTest {
         val entity = AnimeAnalysisEntity(
             id = 2L,
             videoUriString = "content://media/2",
-            videoName = "Episode 09.mp4",
+            videoName = "Video 09.mp4",
             videoSizeBytes = 50_000_000L,
             durationMs = 1500_000L,
             mimeType = "video/mp4",
@@ -215,5 +215,205 @@ class ExampleUnitTest {
         val result = entity.toAnimeAnalysisResult()
         assertEquals("Segmen terakhir dilewati", result.note)
         assertTrue(result.narration.contains("Segmen terakhir dilewati"))
+    }
+
+    @Test
+    fun testAutoSegmentRules() {
+        // Durasi sampai 4,5 menit (<= 270s) = 1 segmen
+        val segmentsUnder4_5Min = com.example.util.SegmentCalculator.calculateSegments(240L, com.example.util.SegmentDurationOption.AUTO)
+        assertEquals(1, segmentsUnder4_5Min.size)
+        assertEquals(0L, segmentsUnder4_5Min[0].startSec)
+        assertEquals(240L, segmentsUnder4_5Min[0].endSec)
+
+        // Durasi 270s tepat = 1 segmen
+        val segmentsExact4_5Min = com.example.util.SegmentCalculator.calculateSegments(270L, com.example.util.SegmentDurationOption.AUTO)
+        assertEquals(1, segmentsExact4_5Min.size)
+        assertEquals(270L, segmentsExact4_5Min[0].endSec)
+
+        // Durasi sampai 12 menit (<= 720s, e.g. 600s = 10 menit) = segmen 3 menit (180s)
+        val segments10Min = com.example.util.SegmentCalculator.calculateSegments(600L, com.example.util.SegmentDurationOption.AUTO)
+        // 600s: 180, 180, 180, sisa 60s (<90s) digabung ke segmen ke-3 -> 3 segmen
+        assertEquals(3, segments10Min.size)
+        assertEquals(0L, segments10Min[0].startSec)
+        assertEquals(180L, segments10Min[0].endSec)
+        assertEquals(180L, segments10Min[1].startSec)
+        assertEquals(360L, segments10Min[1].endSec)
+        assertEquals(360L, segments10Min[2].startSec)
+        assertEquals(600L, segments10Min[2].endSec)
+
+        // Durasi di atas 12 menit (> 720s, e.g. 1500s = 25 menit) = segmen 5 menit (300s)
+        val segments25MinAuto = com.example.util.SegmentCalculator.calculateSegments(1500L, com.example.util.SegmentDurationOption.AUTO)
+        // 1500s / 300s = 5 segmen (300, 300, 300, 300, 300)
+        assertEquals(5, segments25MinAuto.size)
+        assertEquals(0L, segments25MinAuto[0].startSec)
+        assertEquals(300L, segments25MinAuto[0].endSec)
+        assertEquals(1200L, segments25MinAuto.last().startSec)
+        assertEquals(1500L, segments25MinAuto.last().endSec)
+
+        // Opsi eksplisit 3 Menit untuk video 25 menit (1500s)
+        val segments3MinExplicit = com.example.util.SegmentCalculator.calculateSegments(1500L, com.example.util.SegmentDurationOption.THREE_MIN)
+        // 1500: 8 segmen (sisa 60s digabung)
+        assertEquals(8, segments3MinExplicit.size)
+
+        // Opsi eksplisit 5 Menit
+        val segments5MinExplicit = com.example.util.SegmentCalculator.calculateSegments(1500L, com.example.util.SegmentDurationOption.FIVE_MIN)
+        assertEquals(5, segments5MinExplicit.size)
+    }
+
+    @Test
+    fun testPlanSummaryCalculation() {
+        val summary = com.example.util.SegmentCalculator.calculatePlanSummary(
+            totalSeconds = 1500L,
+            option = com.example.util.SegmentDurationOption.AUTO,
+            intervalSeconds = 5
+        )
+        assertEquals(1500L, summary.totalSeconds)
+        assertEquals("25:00 (1500 detik)", summary.totalDurationFormatted)
+        assertEquals("Otomatis (5 Menit)", summary.segmentDurationLabel)
+        assertEquals(5, summary.segmentCount)
+        assertEquals(6, summary.totalRequestsCount) // 5 segmen + 1 narasi
+        assertEquals(300, summary.estimatedScenesCount) // 1500 / 5
+    }
+
+    @Test
+    fun testVideoMatchingTolerance() {
+        fun matches(savedDurationMs: Long, savedSize: Long, newDurationMs: Long, newSize: Long): Boolean {
+            val durationDiffMs = kotlin.math.abs(savedDurationMs - newDurationMs)
+            val durationMatches = durationDiffMs <= 2000L // toleransi 2 detik
+            val sizeMatches = savedSize > 0 && savedSize == newSize
+            return durationMatches && sizeMatches
+        }
+
+        // Sama persis
+        assertTrue(matches(60_000L, 50_000_000L, 60_000L, 50_000_000L))
+        // Selisih 1,5 detik (toleransi 2 detik)
+        assertTrue(matches(60_000L, 50_000_000L, 61_500L, 50_000_000L))
+        // Selisih 2 detik pas
+        assertTrue(matches(60_000L, 50_000_000L, 62_000L, 50_000_000L))
+        // Selisih 3 detik (melebihi toleransi)
+        assertTrue(!matches(60_000L, 50_000_000L, 63_000L, 50_000_000L))
+        // Ukuran beda
+        assertTrue(!matches(60_000L, 50_000_000L, 60_000L, 50_000_001L))
+    }
+
+    @Test
+    fun testQuotaHelperDailyQuotaPerDay() {
+        val errorJson = """
+            {
+              "error": {
+                "code": 429,
+                "message": "Resource has been exhausted (e.g. check quota).",
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                      {
+                        "quotaId": "GenerateContentRequestsPerDayPerProject"
+                      }
+                    ]
+                  },
+                  {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "82451.782049381s"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val result = com.example.util.QuotaHelper.checkQuotaError(429, errorJson)
+        assertTrue(result.isDailyQuota)
+        assertEquals(82451L, result.retryDelaySeconds)
+        assertTrue(result.userMessage.startsWith("Kuota harian habis. Coba lagi sekitar"))
+        assertTrue(result.userMessage.contains("jam"))
+        assertTrue(result.userMessage.contains("menit"))
+    }
+
+    @Test
+    fun testQuotaHelperRetryDelayOver5MinWithoutPerDay() {
+        // Error 429 tanpa kata PerDay, tetapi retryDelay > 5 menit (e.g. 600s = 10 menit)
+        val errorJson = """
+            {
+              "error": {
+                "code": 429,
+                "message": "Too many requests. Please slow down.",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "600s"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val result = com.example.util.QuotaHelper.checkQuotaError(429, errorJson)
+        assertTrue(result.isDailyQuota)
+        assertEquals(600L, result.retryDelaySeconds)
+        assertEquals("Kuota harian habis. Coba lagi sekitar 10 menit", result.userMessage)
+    }
+
+    @Test
+    fun testQuotaHelperPerMinuteQuotaAllowsRetry() {
+        // Error 429 per menit (retryDelay <= 300s dan tidak ada PerDay)
+        val errorJson = """
+            {
+              "error": {
+                "code": 429,
+                "message": "Rate limit exceeded: Requests per minute",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "20s"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val result = com.example.util.QuotaHelper.checkQuotaError(429, errorJson)
+        // Bukan daily quota -> boleh auto-retry 3 kali
+        assertTrue(!result.isDailyQuota)
+        assertEquals(20L, result.retryDelaySeconds)
+        assertTrue(result.userMessage.contains("per menit"))
+    }
+
+    @Test
+    fun testQuotaHelperFormatting() {
+        // 7500 detik = 2 jam 5 menit
+        assertEquals("2 jam 5 menit", com.example.util.QuotaHelper.formatWaitTimeHoursAndMinutes(7500L))
+        // 3600 detik = 1 jam
+        assertEquals("1 jam", com.example.util.QuotaHelper.formatWaitTimeHoursAndMinutes(3600L))
+        // 540 detik = 9 menit
+        assertEquals("9 menit", com.example.util.QuotaHelper.formatWaitTimeHoursAndMinutes(540L))
+        // null / 0 -> 24 jam fallback
+        assertEquals("24 jam", com.example.util.QuotaHelper.formatWaitTimeHoursAndMinutes(null))
+        assertEquals("24 jam", com.example.util.QuotaHelper.formatWaitTimeHoursAndMinutes(0L))
+    }
+
+    @Test
+    fun testErrorContentResumeAndCompletedSegmentsState() {
+        val error = AnalysisState.Error(
+            stage = "Analisis Segmen 3 dari 9",
+            httpCode = 429,
+            rawApiMessage = "Resource exhausted: RequestsPerDay",
+            errorMessage = "Kuota harian habis. Coba lagi sekitar 2 jam 15 menit",
+            canRetry = false,
+            canResume = true,
+            resumeSegment = 3,
+            analysisId = 42L,
+            isDailyQuota = true,
+            completedSegmentsCount = 2,
+            totalSegments = 9,
+            completedSummaries = listOf("Ringkasan Segmen 1", "Ringkasan Segmen 2")
+        )
+
+        assertTrue(error.isDailyQuota)
+        assertEquals(2, error.completedSegmentsCount)
+        assertEquals(9, error.totalSegments)
+        assertEquals(2, error.completedSummaries.size)
+        assertEquals(3, error.resumeSegment)
+        assertEquals("Kuota harian habis. Coba lagi sekitar 2 jam 15 menit", error.errorMessage)
     }
 }

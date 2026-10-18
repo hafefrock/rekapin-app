@@ -28,7 +28,7 @@ sealed interface AnalysisState {
     ) : AnalysisState
 
     data class GeneratingNarration(
-        val message: String = "Menyusun narasi episode lengkap berdasarkan ringkasan segmen..."
+        val message: String = "Menyusun narasi video lengkap berdasarkan ringkasan segmen..."
     ) : AnalysisState
 
     data class Success(
@@ -47,7 +47,12 @@ sealed interface AnalysisState {
         val analysisId: Long? = null,
         val isVideoAccessLost: Boolean = false,
         val expectedDurationMs: Long = 0L,
-        val expectedSizeBytes: Long = 0L
+        val expectedSizeBytes: Long = 0L,
+        val isDailyQuota: Boolean = false,
+        val retryDelaySeconds: Long? = null,
+        val completedSegmentsCount: Int = 0,
+        val totalSegments: Int = 0,
+        val completedSummaries: List<String> = emptyList()
     ) : AnalysisState {
         fun getFullReport(): String {
             if (isVideoAccessLost) {

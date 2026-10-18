@@ -5,6 +5,8 @@ class GeminiApiException(
     val httpCode: Int? = null,
     val rawMessage: String,
     val userFriendlyMessage: String,
+    val isDailyQuota: Boolean = false,
+    val retryDelaySeconds: Long? = null,
     cause: Throwable? = null
 ) : Exception(userFriendlyMessage, cause) {
 

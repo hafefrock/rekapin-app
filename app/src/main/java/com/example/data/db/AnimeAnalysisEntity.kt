@@ -28,6 +28,8 @@ data class AnimeAnalysisEntity(
     val narration: String,
     val lastErrorStage: String = "",
     val lastErrorMessage: String = "",
+    val segmentPlanJson: String = "[]",
+    val segmentDurationMode: String = "AUTO",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {

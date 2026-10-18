@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -86,6 +87,8 @@ import com.example.data.model.SelectedVideo
 import com.example.ui.components.ResultView
 import com.example.ui.components.SettingsDialog
 import com.example.ui.viewmodel.MainViewModel
+import com.example.util.SegmentDurationOption
+import com.example.util.SegmentPlanSummary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,6 +97,9 @@ fun HomeScreen(
 ) {
     val selectedVideo by viewModel.selectedVideo.collectAsState()
     val promptInterval by viewModel.promptIntervalSeconds.collectAsState()
+    val segmentDurationOption by viewModel.segmentDurationOption.collectAsState()
+    val segmentPlanSummary by viewModel.segmentPlanSummary.collectAsState()
+    val pendingMatchDialogState by viewModel.pendingMatchDialogState.collectAsState()
     val analysisState by viewModel.analysisState.collectAsState()
     val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
 
@@ -368,12 +374,15 @@ fun HomeScreen(
                     IdleSetupContent(
                         selectedVideo = selectedVideo,
                         promptInterval = promptInterval,
+                        segmentDurationOption = segmentDurationOption,
+                        segmentPlanSummary = segmentPlanSummary,
                         historyList = historyList,
                         onSelectVideoClicked = {
                             videoPickerLauncher.launch(arrayOf("video/*"))
                         },
                         onClearVideo = { viewModel.clearSelectedVideo() },
                         onIntervalChanged = { viewModel.setIntervalSeconds(it) },
+                        onSegmentDurationChanged = { viewModel.setSegmentDurationOption(it) },
                         onStartAnalysis = { viewModel.startAnalysis() },
                         onResumeAnalysis = { resumeId -> viewModel.startAnalysis(resumeId) },
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
@@ -383,6 +392,58 @@ fun HomeScreen(
                     )
                 }
             }
+        }
+
+        // Dialog Konfirmasi jika video cocok dengan analisis yang belum selesai
+        pendingMatchDialogState?.let { matchState ->
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissPendingMatchDialog() },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Analisis Belum Selesai Ditemukan",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Video \"${matchState.newVideo.displayName}\" cocok dengan analisis sebelumnya yang belum selesai (tersimpan segmen ${matchState.entity.completedSegmentsCount} dari ${matchState.entity.totalSegments}).\n\nApakah Anda ingin melanjutkan analisis lama atau memulai analisis baru?",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.resumeMatchedAnalysis() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("btn_resume_matched_dialog")
+                    ) {
+                        Text("Lanjutkan Analisis Lama", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { viewModel.startFreshAnalysisWithVideo() },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("btn_fresh_matched_dialog")
+                    ) {
+                        Text("Mulai Baru")
+                    }
+                }
+            )
         }
 
         if (isSettingsOpen) {
@@ -399,10 +460,13 @@ fun HomeScreen(
 private fun IdleSetupContent(
     selectedVideo: SelectedVideo?,
     promptInterval: Int,
+    segmentDurationOption: SegmentDurationOption,
+    segmentPlanSummary: SegmentPlanSummary?,
     historyList: List<AnimeAnalysisEntity>,
     onSelectVideoClicked: () -> Unit,
     onClearVideo: () -> Unit,
     onIntervalChanged: (Int) -> Unit,
+    onSegmentDurationChanged: (SegmentDurationOption) -> Unit,
     onStartAnalysis: () -> Unit,
     onResumeAnalysis: (Long) -> Unit,
     onFinishWithoutCurrentSegment: (Long) -> Unit,
@@ -607,14 +671,14 @@ private fun IdleSetupContent(
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "Pilih Video Episode Anime",
+                        text = "Pilih Berkas Video Anime",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Target pemakaian: 1 episode anime berdurasi 25-28 menit (.mp4, .mkv, .webm)",
+                        text = "Target pemakaian: Video anime (.mp4, .mkv, .webm)",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
@@ -725,9 +789,156 @@ private fun IdleSetupContent(
             }
         }
 
-        // Section 2: Pilihan Interval Visual Prompt
+        // Section 2: Pilihan Panjang Segmen
         Text(
-            text = "2. Pilihan Interval Visual Prompt",
+            text = "2. Pilihan Panjang Segmen",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Option Otomatis (Default)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSegmentDurationChanged(SegmentDurationOption.AUTO) }
+                        .background(
+                            if (segmentDurationOption == SegmentDurationOption.AUTO) MaterialTheme.colorScheme.surfaceContainerHighest
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .padding(12.dp)
+                        .testTag("segment_auto_option"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (segmentDurationOption == SegmentDurationOption.AUTO),
+                        onClick = { onSegmentDurationChanged(SegmentDurationOption.AUTO) },
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Otomatis",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Default",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Durasi ≤4,5m = 1 segmen; ≤12m = 3 menit; >12m = 5 menit",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Option 3 Menit
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSegmentDurationChanged(SegmentDurationOption.THREE_MIN) }
+                        .background(
+                            if (segmentDurationOption == SegmentDurationOption.THREE_MIN) MaterialTheme.colorScheme.surfaceContainerHighest
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .padding(12.dp)
+                        .testTag("segment_3m_option"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (segmentDurationOption == SegmentDurationOption.THREE_MIN),
+                        onClick = { onSegmentDurationChanged(SegmentDurationOption.THREE_MIN) },
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "3 Menit",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Segmen 3 menit per pemanggilan Gemini (standar terinci)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Option 5 Menit
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSegmentDurationChanged(SegmentDurationOption.FIVE_MIN) }
+                        .background(
+                            if (segmentDurationOption == SegmentDurationOption.FIVE_MIN) MaterialTheme.colorScheme.surfaceContainerHighest
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .padding(12.dp)
+                        .testTag("segment_5m_option"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (segmentDurationOption == SegmentDurationOption.FIVE_MIN),
+                        onClick = { onSegmentDurationChanged(SegmentDurationOption.FIVE_MIN) },
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "5 Menit",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Segmen 5 menit per pemanggilan (mengurangi jumlah request)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 3: Pilihan Interval Visual Prompt
+        Text(
+            text = "3. Pilihan Interval Visual Prompt",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             color = MaterialTheme.colorScheme.onSurface
@@ -785,7 +996,7 @@ private fun IdleSetupContent(
                             }
                         }
                         Text(
-                            text = "Rekomendasi optimal untuk episode anime 25-28 menit (hemat kuota & cepat)",
+                            text = "Rekomendasi optimal untuk video anime (hemat kuota & cepat)",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -833,7 +1044,162 @@ private fun IdleSetupContent(
             }
         }
 
-        // Section 3: Ringkasan Alur Analisis
+        // Section 4: Ringkasan Rencana Analisis (Tampil sebelum tombol "Analisis" aktif)
+        Text(
+            text = "4. Ringkasan Rencana Analisis",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (selectedVideo != null) MaterialTheme.colorScheme.surfaceContainerLow
+                else MaterialTheme.colorScheme.surface
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = if (selectedVideo != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                    else MaterialTheme.colorScheme.outline,
+                    shape = RoundedCornerShape(16.dp)
+                )
+                .testTag("segment_plan_summary_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                if (selectedVideo != null && segmentPlanSummary != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Animation,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Rencana Segmen & Permintaan AI",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 1. Durasi video
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Durasi Video",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = segmentPlanSummary.totalDurationFormatted,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 2. Panjang segmen terpilih
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Panjang Segmen Terpilih",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = segmentPlanSummary.segmentDurationLabel,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 3. Jumlah segmen
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Jumlah Segmen",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${segmentPlanSummary.segmentCount} Segmen",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 4. Perkiraan jumlah adegan
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Perkiraan Jumlah Adegan",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "±${segmentPlanSummary.estimatedScenesCount} adegan visual",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 5. Jumlah permintaan (segmen + 1 narasi)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Jumlah Permintaan AI",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${segmentPlanSummary.totalRequestsCount} (${segmentPlanSummary.segmentCount} segmen + 1 narasi)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Silakan pilih video anime terlebih dahulu untuk melihat ringkasan durasi, pembagian segmen, dan perkiraan jumlah permintaan AI.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        // Section 5: Ringkasan Alur Analisis
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -1018,7 +1384,7 @@ private fun ProgressContent(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Menyusun Narasi Episode",
+                            text = "Menyusun Narasi Video",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1305,8 +1671,66 @@ private fun ErrorContent(
                         Spacer(modifier = Modifier.height(14.dp))
                     }
 
-                    // Fitur Lanjutkan jika ada segmen yang tersimpan
-                    if (errorState.canResume) {
+                    // Tampilkan hasil segmen yang sudah selesai jika ada
+                    if (errorState.completedSegmentsCount > 0 || errorState.completedSummaries.isNotEmpty()) {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(vertical = 4.dp)
+                                .testTag("card_completed_segments")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Hasil Segmen Tersimpan (${errorState.completedSegmentsCount} dari ${errorState.totalSegments} Segmen)",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Data analisis hingga segmen ${errorState.completedSegmentsCount} telah tersimpan aman di database.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (errorState.completedSummaries.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    errorState.completedSummaries.forEachIndexed { idx, summary ->
+                                        Text(
+                                            text = "• Segmen ${idx + 1}: $summary",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Fitur Lanjutkan jika ada segmen yang tersimpan atau kuota harian habis
+                    val showResumeButton = errorState.isDailyQuota || errorState.canResume
+                    if (showResumeButton) {
                         Button(
                             onClick = { onResume(errorState.analysisId) },
                             colors = ButtonDefaults.buttonColors(
@@ -1326,7 +1750,7 @@ private fun ErrorContent(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Lanjutkan dari Segmen ${errorState.resumeSegment}",
+                                text = if (errorState.isDailyQuota) "Lanjutkan" else "Lanjutkan dari Segmen ${errorState.resumeSegment}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1363,46 +1787,63 @@ private fun ErrorContent(
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
-                    // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (tanpa wrap 2 baris)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (hanya jika bukan kuota harian)
+                    if (errorState.isDailyQuota) {
                         OutlinedButton(
                             onClick = onOpenSettings,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .height(48.dp)
                                 .testTag("btn_error_settings")
                         ) {
                             Text(
-                                text = "API Key",
+                                text = "Kelola API Key",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Button(
-                            onClick = onRetry,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (errorState.canResume) MaterialTheme.colorScheme.surfaceVariant
-                                else MaterialTheme.colorScheme.primary,
-                                contentColor = if (errorState.canResume) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("btn_error_retry")
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                text = "Coba Lagi",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                maxLines = 1
-                            )
+                            OutlinedButton(
+                                onClick = onOpenSettings,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("btn_error_settings")
+                            ) {
+                                Text(
+                                    text = "API Key",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                            Button(
+                                onClick = onRetry,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (errorState.canResume) MaterialTheme.colorScheme.surfaceVariant
+                                    else MaterialTheme.colorScheme.primary,
+                                    contentColor = if (errorState.canResume) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("btn_error_retry")
+                            ) {
+                                Text(
+                                    text = "Coba Lagi",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
 

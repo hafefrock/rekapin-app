@@ -19,6 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
+import com.example.util.QuotaHelper
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -88,11 +89,15 @@ class GeminiApiClient(
                     val errBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
                         Log.e(TAG, "[$stageName] Inisialisasi upload gagal. HTTP ${res.code}: $errBody")
+                        val quotaCheck = QuotaHelper.checkQuotaError(res.code, errBody)
                         throw GeminiApiException(
                             stage = stageName,
                             httpCode = res.code,
                             rawMessage = errBody,
-                            userFriendlyMessage = "Gagal memulai upload video ke server Google AI: ${parseErrorMessage(errBody, res.code)}"
+                            userFriendlyMessage = if (quotaCheck.isDailyQuota) quotaCheck.userMessage
+                                else "Gagal memulai upload video ke server Google AI: ${parseErrorMessage(errBody, res.code)}",
+                            isDailyQuota = quotaCheck.isDailyQuota,
+                            retryDelaySeconds = quotaCheck.retryDelaySeconds
                         )
                     }
                     val url = res.header("x-goog-upload-url")
@@ -163,11 +168,15 @@ class GeminiApiClient(
                     val respBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
                         Log.e(TAG, "[$stageName] Finalisasi upload gagal. HTTP ${res.code}: $respBody")
+                        val quotaCheck = QuotaHelper.checkQuotaError(res.code, respBody)
                         throw GeminiApiException(
                             stage = stageName,
                             httpCode = res.code,
                             rawMessage = respBody,
-                            userFriendlyMessage = "Gagal menyelesaikan pengunggahan video: ${parseErrorMessage(respBody, res.code)}"
+                            userFriendlyMessage = if (quotaCheck.isDailyQuota) quotaCheck.userMessage
+                                else "Gagal menyelesaikan pengunggahan video: ${parseErrorMessage(respBody, res.code)}",
+                            isDailyQuota = quotaCheck.isDailyQuota,
+                            retryDelaySeconds = quotaCheck.retryDelaySeconds
                         )
                     }
 
@@ -225,11 +234,15 @@ class GeminiApiClient(
                         val respBody = res.body?.string().orEmpty()
                         if (!res.isSuccessful) {
                             Log.e(TAG, "[$stageName] Gagal memeriksa status berkas. HTTP ${res.code}: $respBody")
+                            val quotaCheck = QuotaHelper.checkQuotaError(res.code, respBody)
                             throw GeminiApiException(
                                 stage = stageName,
                                 httpCode = res.code,
                                 rawMessage = respBody,
-                                userFriendlyMessage = "Gagal memeriksa status video: ${parseErrorMessage(respBody, res.code)}"
+                                userFriendlyMessage = if (quotaCheck.isDailyQuota) quotaCheck.userMessage
+                                    else "Gagal memeriksa status video: ${parseErrorMessage(respBody, res.code)}",
+                                isDailyQuota = quotaCheck.isDailyQuota,
+                                retryDelaySeconds = quotaCheck.retryDelaySeconds
                             )
                         }
                         val json = JSONObject(respBody)
@@ -403,7 +416,7 @@ class GeminiApiClient(
         characterSheet: List<CharacterInfo>,
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
-        val stageName = "Penyusunan Narasi Rekap Episode"
+        val stageName = "Penyusunan Narasi Rekap Video"
         val apiKey = getValidApiKey(stageName)
 
         Log.i(TAG, "[$stageName] Menyusun narasi dari ${segmentSummaries.size} ringkasan segmen di thread: ${Thread.currentThread().name}")
@@ -539,8 +552,22 @@ class GeminiApiClient(
                     return@withContext responseBody
                 }
 
-                // HTTP 500 diperlakukan seperti 503 (dan 429 rate limit):
-                // retry otomatis maksimal 3 kali dengan jeda bertahap (10, 30, 60 detik)
+                // 1. Cek kuota harian: Jika error 429 berisi "PerDay" atau retryDelay > 5 menit, JANGAN retry.
+                val quotaCheck = QuotaHelper.checkQuotaError(statusCode, responseBody)
+                if (quotaCheck.isDailyQuota) {
+                    Log.e(TAG, "[$stage] Kuota harian habis / retryDelay > 5 menit (${quotaCheck.retryDelaySeconds}s). JANGAN retry.")
+                    throw GeminiApiException(
+                        stage = stage,
+                        httpCode = statusCode,
+                        rawMessage = responseBody,
+                        userFriendlyMessage = quotaCheck.userMessage,
+                        isDailyQuota = true,
+                        retryDelaySeconds = quotaCheck.retryDelaySeconds
+                    )
+                }
+
+                // 2. Retry otomatis HANYA untuk HTTP 503, 500, dan 429 per menit,
+                // maksimal 3 kali dengan jeda bertahap (10, 30, 60 detik)
                 if (statusCode == 500 || statusCode == 503 || statusCode == 429) {
                     if (attempt <= maxRetries) {
                         val waitMs = retryDelaysMs[attempt - 1]
@@ -550,7 +577,7 @@ class GeminiApiClient(
                             val statusText = if (statusCode == 500 || statusCode == 503) {
                                 "Server Google AI sibuk / kendala internal (HTTP $statusCode). Mencoba ulang otomatis dalam $sec detik ($attempt/$maxRetries)..."
                             } else {
-                                "Mencapai batas kuota sementara (HTTP $statusCode). Mencoba ulang otomatis dalam $sec detik ($attempt/$maxRetries)..."
+                                "Mencapai batas kuota per menit (HTTP 429). Mencoba ulang otomatis dalam $sec detik ($attempt/$maxRetries)..."
                             }
                             onStatusUpdate(statusText)
                             delay(1000L)
@@ -563,20 +590,23 @@ class GeminiApiClient(
                             httpCode = statusCode,
                             rawMessage = responseBody,
                             userFriendlyMessage = if (statusCode == 500 || statusCode == 503) {
-                                "Server Google AI mengalami gangguan sementara (HTTP $statusCode). Silakan coba lagi atau selesaikan tanpa segmen ini."
+                                "Server Google AI mengalami gangguan sementara (HTTP $statusCode) setelah $maxRetries kali percobaan."
                             } else {
-                                "Batas permintaan Gemini terlampaui (HTTP $statusCode). Silakan tunggu beberapa saat atau periksa kuota API Key Anda di menu API Key."
-                            }
+                                "Batas kuota per menit Gemini terlampaui (HTTP 429) setelah $maxRetries kali percobaan."
+                            },
+                            isDailyQuota = false
                         )
                     }
                 }
 
-                Log.e(TAG, "[$stage] Permintaan API gagal. HTTP $statusCode: $responseBody")
+                // HTTP error lainnya (400, 401, 403, dll) JANGAN di-retry
+                Log.e(TAG, "[$stage] Permintaan API gagal tanpa retry. HTTP $statusCode: $responseBody")
                 throw GeminiApiException(
                     stage = stage,
                     httpCode = statusCode,
                     rawMessage = responseBody,
-                    userFriendlyMessage = parseErrorMessage(responseBody, statusCode)
+                    userFriendlyMessage = parseErrorMessage(responseBody, statusCode),
+                    isDailyQuota = false
                 )
 
             } catch (e: GeminiApiException) {
@@ -770,6 +800,10 @@ class GeminiApiClient(
     }
 
     private fun parseErrorMessage(errorBody: String, statusCode: Int): String {
+        val quotaCheck = QuotaHelper.checkQuotaError(statusCode, errorBody)
+        if (quotaCheck.isDailyQuota) {
+            return quotaCheck.userMessage
+        }
         return try {
             val json = JSONObject(errorBody)
             val errorObj = json.optJSONObject("error")
@@ -777,12 +811,12 @@ class GeminiApiClient(
             when (statusCode) {
                 400 -> "Parameter permintaan tidak valid: $msg"
                 401, 403 -> "API Key tidak valid atau tidak diizinkan: $msg"
-                429 -> "Batas kuota gratis Gemini terlampaui. Silakan tunggu beberapa saat."
+                429 -> "Batas kuota per menit Gemini terlampaui. Silakan tunggu beberapa saat."
                 503 -> "Layanan Gemini AI sedang sibuk. Silakan coba kembali."
                 else -> msg
             }
         } catch (_: Exception) {
-            if (statusCode == 429) "Batas kuota gratis Gemini terlampaui."
+            if (statusCode == 429) "Batas kuota per menit Gemini terlampaui."
             else if (statusCode == 503) "Layanan Google AI sedang sibuk."
             else "Terjadi kendala pada server (Kode HTTP $statusCode)."
         }
