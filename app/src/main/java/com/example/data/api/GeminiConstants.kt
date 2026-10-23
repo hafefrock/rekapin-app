@@ -7,7 +7,7 @@ object GeminiConstants {
      * "Pakai model Gemini Flash terbaru yang tersedia di free tier (Gemini 3.8 Flash).
      * Tulis nama model sebagai satu konstanta di satu tempat agar mudah diganti."
      */
-    const val GEMINI_MODEL = "gemini-2.5-flash"
+    const val GEMINI_MODEL = "gemini-3.8-flash"
 
     // Rentang analisis per segmen video: 3 menit (180 detik)
     const val SEGMENT_DURATION_SECONDS = 180L

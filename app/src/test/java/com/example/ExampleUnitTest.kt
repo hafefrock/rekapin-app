@@ -22,7 +22,7 @@ class ExampleUnitTest {
 
     @Test
     fun verifyGeminiModelConstant() {
-        assertEquals("gemini-2.5-flash", GeminiConstants.GEMINI_MODEL)
+        assertEquals("gemini-3.8-flash", GeminiConstants.GEMINI_MODEL)
     }
 
     @Test
@@ -494,21 +494,20 @@ class ExampleUnitTest {
         context.getSharedPreferences("rekapin_model_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         val storage = com.example.data.prefs.ModelStorage(context)
 
-        // 1. Jika belum ada daftar tersimpan, getModels() mengembalikan lima model berurutan:
-        // gemini-2.5-flash, gemini-3.8-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.5-flash-lite
+        // 1. Jika belum ada daftar tersimpan, getModels() mengembalikan empat model berurutan:
+        // gemini-3.8-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.5-flash-lite
         val initialModels = storage.getModels()
-        assertEquals(5, initialModels.size)
-        assertEquals("gemini-2.5-flash", initialModels[0])
-        assertEquals("gemini-3.8-flash", initialModels[1])
-        assertEquals("gemini-3.6-flash", initialModels[2])
-        assertEquals("gemini-3.7-flash", initialModels[3])
-        assertEquals("gemini-3.5-flash-lite", initialModels[4])
+        assertEquals(4, initialModels.size)
+        assertEquals("gemini-3.8-flash", initialModels[0])
+        assertEquals("gemini-3.6-flash", initialModels[1])
+        assertEquals("gemini-3.7-flash", initialModels[2])
+        assertEquals("gemini-3.5-flash-lite", initialModels[3])
 
-        // Model terpilih bawaan tetap yang pertama (gemini-2.5-flash)
-        assertEquals("gemini-2.5-flash", storage.getSelectedModel())
+        // Model terpilih bawaan tetap yang pertama (gemini-3.8-flash)
+        assertEquals("gemini-3.8-flash", storage.getSelectedModel())
 
-        // 2. Pertahankan DEFAULT_MODEL (gemini-2.5-flash) sebagai cadangan
-        assertEquals("gemini-2.5-flash", com.example.data.prefs.ModelStorage.DEFAULT_MODEL)
+        // 2. Pertahankan DEFAULT_MODEL (gemini-3.8-flash) sebagai cadangan
+        assertEquals("gemini-3.8-flash", com.example.data.prefs.ModelStorage.DEFAULT_MODEL)
 
         // Default auto-switch: mati (false)
         org.junit.Assert.assertFalse(storage.isAutoSwitchOnQuota())

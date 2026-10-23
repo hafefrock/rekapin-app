@@ -10,15 +10,17 @@ class ModelStorage(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
-        // Pastikan gemini-2.5-flash ditambahkan dan terpilih sebagai model utama
-        if (!prefs.getBoolean(KEY_MIGRATED_25_FLASH, false)) {
-            val currentModels = getModels().toMutableList()
-            if (!currentModels.contains("gemini-2.5-flash")) {
-                currentModels.add(0, "gemini-2.5-flash")
-                saveModelsInternal(currentModels)
-            }
-            setSelectedModel("gemini-2.5-flash")
-            prefs.edit().putBoolean(KEY_MIGRATED_25_FLASH, true).apply()
+        // Hapus gemini-2.5-flash yang sudah tidak tersedia dari server dan aktifkan gemini-3.8-flash
+        val currentModels = getModels().toMutableList()
+        currentModels.remove("gemini-2.5-flash")
+        if (!currentModels.contains("gemini-3.8-flash")) {
+            currentModels.add(0, "gemini-3.8-flash")
+        }
+        saveModelsInternal(currentModels)
+
+        val selected = prefs.getString(KEY_SELECTED_MODEL, "")?.trim().orEmpty()
+        if (selected == "gemini-2.5-flash" || selected.isBlank()) {
+            setSelectedModel("gemini-3.8-flash")
         }
     }
 
@@ -33,15 +35,15 @@ class ModelStorage(context: Context) {
             val array = JSONArray(jsonStr)
             for (i in 0 until array.length()) {
                 val item = array.optString(i, "").trim()
-                if (item.isNotBlank() && !list.contains(item)) {
+                if (item.isNotBlank() && item != "gemini-2.5-flash" && !list.contains(item)) {
                     list.add(item)
                 }
             }
         } catch (_: Exception) {
             // fallback gracefully
         }
-        if (!list.contains("gemini-2.5-flash")) {
-            list.add(0, "gemini-2.5-flash")
+        if (!list.contains("gemini-3.8-flash")) {
+            list.add(0, "gemini-3.8-flash")
         }
         return if (list.isEmpty()) listOf(DEFAULT_MODEL) else list
     }
@@ -135,7 +137,6 @@ class ModelStorage(context: Context) {
 
         val DEFAULT_MODEL = GeminiConstants.GEMINI_MODEL
         val DEFAULT_MODELS = listOf(
-            "gemini-2.5-flash",
             "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.7-flash",
