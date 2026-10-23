@@ -635,7 +635,7 @@ fun SettingsDialog(
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-                } else {
+                } else if (selectedTab == 2) {
                     // TAB 2: Bahasa Narasi
                     Text(
                         text = "Pilih bahasa untuk hasil narasi rekap akhir. Ringkasan segmen, character sheet, deskripsi adegan, dan visual prompt tetap dalam Bahasa Inggris (USA).",

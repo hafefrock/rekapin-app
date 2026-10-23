@@ -117,6 +117,7 @@ import com.example.ui.components.ManualQuotaDialog
 import com.example.ui.components.ResultView
 import com.example.ui.components.SettingsDialog
 import com.example.ui.viewmodel.MainViewModel
+import com.example.util.SegmentCalculator
 import com.example.util.SegmentDurationOption
 import com.example.util.SegmentPlanSummary
 
@@ -668,6 +669,7 @@ private fun IdleSetupContent(
     onOpenHistory: () -> Unit,
     hasApiKey: Boolean
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
 
