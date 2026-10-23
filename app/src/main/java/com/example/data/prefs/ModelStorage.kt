@@ -9,6 +9,19 @@ class ModelStorage(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    init {
+        // Pastikan gemini-2.5-flash ditambahkan dan terpilih sebagai model utama
+        if (!prefs.getBoolean(KEY_MIGRATED_25_FLASH, false)) {
+            val currentModels = getModels().toMutableList()
+            if (!currentModels.contains("gemini-2.5-flash")) {
+                currentModels.add(0, "gemini-2.5-flash")
+                saveModelsInternal(currentModels)
+            }
+            setSelectedModel("gemini-2.5-flash")
+            prefs.edit().putBoolean(KEY_MIGRATED_25_FLASH, true).apply()
+        }
+    }
+
     @Synchronized
     fun getModels(): List<String> {
         val jsonStr = prefs.getString(KEY_MODELS_JSON, null)
@@ -26,6 +39,9 @@ class ModelStorage(context: Context) {
             }
         } catch (_: Exception) {
             // fallback gracefully
+        }
+        if (!list.contains("gemini-2.5-flash")) {
+            list.add(0, "gemini-2.5-flash")
         }
         return if (list.isEmpty()) listOf(DEFAULT_MODEL) else list
     }
@@ -115,9 +131,11 @@ class ModelStorage(context: Context) {
         private const val KEY_MODELS_JSON = "gemini_models_list_json"
         private const val KEY_SELECTED_MODEL = "selected_gemini_model"
         private const val KEY_AUTO_SWITCH_QUOTA = "auto_switch_model_on_quota"
+        private const val KEY_MIGRATED_25_FLASH = "migrated_to_gemini_2_5_flash"
 
         val DEFAULT_MODEL = GeminiConstants.GEMINI_MODEL
         val DEFAULT_MODELS = listOf(
+            "gemini-2.5-flash",
             "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.7-flash",

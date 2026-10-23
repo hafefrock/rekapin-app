@@ -223,7 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setIntervalSeconds(seconds: Int) {
-        if (seconds == 3 || seconds == 5) {
+        if (seconds == 3 || seconds == 5 || seconds == 10) {
             _promptIntervalSeconds.value = seconds
             Log.d(TAG, "Interval visual prompt diubah menjadi: $seconds detik")
             updatePlanSummary()
@@ -342,6 +342,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshApiKeys()
         Log.i(TAG, "API Key baru disimpan (panjang: ${newKey.length} karakter)")
         closeSettings()
+    }
+
+    suspend fun testApiKey(key: String): Pair<Boolean, String> {
+        val result = geminiClient.testApiKey(key, _selectedModel.value)
+        return Pair(result.isSuccess, result.message)
     }
 
     fun refreshModels() {

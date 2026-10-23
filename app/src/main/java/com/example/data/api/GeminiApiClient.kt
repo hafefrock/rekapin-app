@@ -911,6 +911,79 @@ class GeminiApiClient(
         return String.format(Locale.US, "%02d:%02d", m, s)
     }
 
+    data class KeyTestResult(
+        val isSuccess: Boolean,
+        val httpCode: Int?,
+        val message: String
+    )
+
+    /**
+     * Menguji validitas dan kuota sebuah API Key dengan request teks minimalis ("ping").
+     * Mengembalikan KeyTestResult dengan status jelas (Sukses, Kuota Habis 429, Invalid 400/401/403, Sibuk 503, dll).
+     */
+    suspend fun testApiKey(apiKey: String, model: String = GeminiConstants.GEMINI_MODEL): KeyTestResult = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext KeyTestResult(false, null, "API Key kosong.")
+        }
+        val cleanModel = model.trim().ifBlank { GeminiConstants.GEMINI_MODEL }
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/$cleanModel:generateContent?key=${apiKey.trim()}"
+        val payload = JSONObject().apply {
+            val contents = JSONArray().apply {
+                val item = JSONObject().apply {
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply { put("text", "ping") })
+                    }
+                    put("parts", parts)
+                }
+                put(item)
+            }
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("maxOutputTokens", 5)
+            })
+        }.toString()
+
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        try {
+            val response = client.newCall(request).execute()
+            response.use { res ->
+                val body = res.body?.string().orEmpty()
+                if (res.isSuccessful) {
+                    KeyTestResult(
+                        isSuccess = true,
+                        httpCode = res.code,
+                        message = "Key aktif & kuota tersedia!"
+                    )
+                } else {
+                    val quotaCheck = QuotaHelper.checkQuotaError(res.code, body)
+                    val errorMsg = when {
+                        quotaCheck.isDailyQuota -> quotaCheck.userMessage
+                        res.code == 429 -> "Batas kuota per menit terlampaui (HTTP 429)."
+                        res.code == 400 || res.code == 401 || res.code == 403 -> "Key tidak valid atau belum aktif (HTTP ${res.code})."
+                        res.code == 404 -> "Model tidak ditemukan (HTTP 404)."
+                        res.code == 503 -> "Server Google AI sibuk (HTTP 503)."
+                        else -> parseErrorMessage(body, res.code)
+                    }
+                    KeyTestResult(
+                        isSuccess = false,
+                        httpCode = res.code,
+                        message = errorMsg
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            KeyTestResult(
+                isSuccess = false,
+                httpCode = null,
+                message = "Gagal terhubung: ${e.localizedMessage ?: "Gangguan internet"}"
+            )
+        }
+    }
+
     private fun getValidApiKey(stage: String): String {
         val key = apiKeyProvider()
         if (key.isBlank()) {

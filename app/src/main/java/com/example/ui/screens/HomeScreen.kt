@@ -603,7 +603,8 @@ fun HomeScreen(
                 onDeleteCustomStyle = { id -> viewModel.deleteCustomStyle(id) },
                 modelUsageStorage = viewModel.modelUsageStorage,
                 onSetModelLimit = { model, limit -> viewModel.setModelLimit(model, limit) },
-                onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) }
+                onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) },
+                onTestKey = { key -> viewModel.testApiKey(key) }
             )
         }
 
@@ -1509,6 +1510,61 @@ private fun IdleSetupContent(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
+                // Option 10 Detik
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onIntervalChanged(10) }
+                        .background(
+                            if (promptInterval == 10) MaterialTheme.colorScheme.surfaceContainerHighest
+                            else MaterialTheme.colorScheme.surface
+                        )
+                        .padding(12.dp)
+                        .testTag("interval_10s_option"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = (promptInterval == 10),
+                        onClick = { onIntervalChanged(10) },
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "10 Detik",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Stabil & Cepat",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Paling hemat kuota dan stabil untuk mencegah server Google sibuk (503)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 // Option 5 Detik (Default)
                 Row(
                     modifier = Modifier

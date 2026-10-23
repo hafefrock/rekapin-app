@@ -26,12 +26,15 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -40,6 +43,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,10 +65,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -103,12 +110,16 @@ fun SettingsDialog(
     onDeleteCustomStyle: ((id: String) -> Unit)? = null,
     modelUsageStorage: com.example.data.prefs.ModelUsageStorage? = null,
     onSetModelLimit: ((model: String, limit: Int) -> Unit)? = null,
-    onSetModelUsage: ((model: String, usage: Int) -> Unit)? = null
+    onSetModelUsage: ((model: String, usage: Int) -> Unit)? = null,
+    onTestKey: (suspend (key: String) -> Pair<Boolean, String>)? = null
 ) {
+    val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddKeyDialog by remember { mutableStateOf(false) }
     var keyToRename by remember { mutableStateOf<ApiKeyItem?>(null) }
     var keyToDelete by remember { mutableStateOf<ApiKeyItem?>(null) }
+    var testingKeyId by remember { mutableStateOf<String?>(null) }
+    var testResults by remember { mutableStateOf<Map<String, Pair<Boolean, String>>>(emptyMap()) }
 
     var showAddModelDialog by remember { mutableStateOf(false) }
     var modelToDelete by remember { mutableStateOf<String?>(null) }
@@ -352,6 +363,69 @@ fun SettingsDialog(
                                                 fontFamily = FontFamily.Monospace,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
+
+                                            testResults[item.id]?.let { (isOk, msg) ->
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(
+                                                            if (isOk) Color(0xFF1B3820) else Color(0xFF381B1B)
+                                                        )
+                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isOk) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                                                        contentDescription = null,
+                                                        tint = if (isOk) Color(0xFF4CAF50) else Color(0xFFEF5350),
+                                                        modifier = Modifier.size(11.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = msg,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = if (isOk) Color(0xFF81C784) else Color(0xFFEF9A9A),
+                                                        lineHeight = 13.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (onTestKey != null) {
+                                            val isTesting = (testingKeyId == item.id)
+                                            IconButton(
+                                                onClick = {
+                                                    if (testingKeyId == null) {
+                                                        testingKeyId = item.id
+                                                        coroutineScope.launch {
+                                                            val res = onTestKey.invoke(item.key)
+                                                            testResults = testResults + (item.id to res)
+                                                            testingKeyId = null
+                                                        }
+                                                    }
+                                                },
+                                                enabled = (testingKeyId == null),
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .testTag("btn_test_key_${item.id}")
+                                            ) {
+                                                if (isTesting) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(14.dp),
+                                                        strokeWidth = 2.dp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PlayArrow,
+                                                        contentDescription = "Tes API Key",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
                                         }
 
                                         IconButton(
@@ -1137,7 +1211,8 @@ fun SettingsDialog(
             onConfirm = { name, key ->
                 onAddKey(name, key)
                 showAddKeyDialog = false
-            }
+            },
+            onTestKey = onTestKey
         )
     }
 
@@ -1339,11 +1414,15 @@ private fun AddCustomModelDialog(
 private fun AddKeyDialog(
     nextDefaultName: String,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, key: String) -> Unit
+    onConfirm: (name: String, key: String) -> Unit,
+    onTestKey: (suspend (key: String) -> Pair<Boolean, String>)? = null
 ) {
     var nameInput by remember { mutableStateOf(nextDefaultName) }
     var keyInput by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    var isTesting by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1371,7 +1450,10 @@ private fun AddKeyDialog(
 
                 OutlinedTextField(
                     value = keyInput,
-                    onValueChange = { keyInput = it },
+                    onValueChange = {
+                        keyInput = it
+                        testResult = null
+                    },
                     label = { Text("Gemini API Key") },
                     placeholder = { Text("AIzaSy...") },
                     singleLine = true,
@@ -1393,6 +1475,63 @@ private fun AddKeyDialog(
                         .fillMaxWidth()
                         .testTag("input_api_key_value")
                 )
+
+                if (onTestKey != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val clean = keyInput.trim()
+                                if (clean.isNotBlank() && !isTesting) {
+                                    isTesting = true
+                                    testResult = null
+                                    coroutineScope.launch {
+                                        val res = onTestKey.invoke(clean)
+                                        testResult = res
+                                        isTesting = false
+                                    }
+                                }
+                            },
+                            enabled = keyInput.trim().isNotBlank() && !isTesting,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("btn_test_new_key_dialog")
+                        ) {
+                            if (isTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Menguji...", fontSize = 11.sp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Tes Key Ini", fontSize = 11.sp)
+                            }
+                        }
+
+                        testResult?.let { (isOk, msg) ->
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = msg,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isOk) Color(0xFF81C784) else Color(0xFFEF9A9A),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
