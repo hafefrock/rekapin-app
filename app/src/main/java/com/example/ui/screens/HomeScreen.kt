@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
@@ -68,13 +70,18 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +90,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.example.util.VideoThumbnailHelper
+import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -130,6 +142,8 @@ fun HomeScreen(
     val selectedModelUsage by viewModel.selectedModelUsage.collectAsState()
     val visualStyles by viewModel.visualStyles.collectAsState()
     val selectedStyle by viewModel.selectedStyle.collectAsState()
+    val analysisRangeStartSec by viewModel.analysisRangeStartSec.collectAsState()
+    val analysisRangeEndSec by viewModel.analysisRangeEndSec.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -471,6 +485,9 @@ fun HomeScreen(
                         visualStyles = visualStyles,
                         selectedStyle = selectedStyle,
                         onSelectStyle = { viewModel.selectStyle(it) },
+                        analysisRangeStartSec = analysisRangeStartSec,
+                        analysisRangeEndSec = analysisRangeEndSec,
+                        onRangeChanged = { start, end -> viewModel.setAnalysisRange(start, end) },
                         onOpenManualQuota = { manualQuotaModelToEdit = it },
                         onSelectModel = { viewModel.setSelectedModel(it) },
                         onSelectVideoClicked = {
@@ -635,6 +652,9 @@ private fun IdleSetupContent(
     visualStyles: List<VisualStyle>,
     selectedStyle: VisualStyle,
     onSelectStyle: (VisualStyle) -> Unit,
+    analysisRangeStartSec: Long,
+    analysisRangeEndSec: Long,
+    onRangeChanged: (Long, Long) -> Unit,
     onOpenManualQuota: (String) -> Unit,
     onSelectModel: (String) -> Unit,
     onSelectVideoClicked: () -> Unit,
@@ -957,6 +977,369 @@ private fun IdleSetupContent(
                                 .testTag("btn_change_video")
                         ) {
                             Text("Ganti Video", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bagian Rentang Analisis (Hanya tampil setelah video dipilih dan durasi terbaca)
+        if (selectedVideo != null && selectedVideo.durationMs > 0) {
+            val totalVideoSeconds = (selectedVideo.durationMs / 1000).coerceAtLeast(1L)
+            val currentRangeStart = analysisRangeStartSec.coerceIn(0L, totalVideoSeconds)
+            val currentRangeEnd = if (analysisRangeEndSec <= 0L || analysisRangeEndSec > totalVideoSeconds) totalVideoSeconds else analysisRangeEndSec
+
+            Text(
+                text = "Rentang Analisis",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("analysis_range_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCut,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Potong / Batasi Video",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Badge Rentang Aktif
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "${SegmentCalculator.formatTimeSeconds(currentRangeEnd - currentRangeStart)} terpilih",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Analisis hanya sebagian video atau seluruhnya. Geser slider atau masukkan waktu manual (mm:ss atau h:mm:ss).",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 15.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Thumbnail frame preview saat slider digeser
+                    var activeThumbTimeSec by remember { mutableStateOf<Long?>(currentRangeStart) }
+                    var activeThumbLabel by remember { mutableStateOf("Awal") }
+                    var thumbBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+                    var isThumbLoading by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(activeThumbTimeSec) {
+                        val sec = activeThumbTimeSec ?: return@LaunchedEffect
+                        delay(200) // Jeda 200 ms agar ringan di HP RAM kecil
+                        isThumbLoading = true
+                        val bmp = VideoThumbnailHelper.getFrameThumbnail(context, selectedVideo.uri, sec)
+                        thumbBitmap = bmp
+                        isThumbLoading = false
+                    }
+
+                    // Tampilan Frame Thumbnail
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (thumbBitmap != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                ) {
+                                    Image(
+                                        bitmap = thumbBitmap!!.asImageBitmap(),
+                                        contentDescription = "Thumbnail frame posisi $activeThumbLabel",
+                                        modifier = Modifier
+                                            .width(160.dp)
+                                            .height(90.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .background(Color.Black.copy(alpha = 0.75f))
+                                            .padding(vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "$activeThumbLabel: ${SegmentCalculator.formatTimeSeconds(activeThumbTimeSec ?: 0L)}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.align(Alignment.Center)
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .width(160.dp)
+                                        .height(90.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isThumbLoading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Movie,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Geser slider untuk pratinjau",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // RangeSlider
+                    RangeSlider(
+                        value = currentRangeStart.toFloat()..currentRangeEnd.toFloat(),
+                        onValueChange = { range ->
+                            val startMoved = kotlin.math.abs(range.start - currentRangeStart.toFloat()) > 0.5f
+                            var newStart = range.start.toLong().coerceIn(0L, totalVideoSeconds - SegmentCalculator.MIN_RANGE_SECONDS)
+                            var newEnd = range.endInclusive.toLong().coerceIn(SegmentCalculator.MIN_RANGE_SECONDS, totalVideoSeconds)
+
+                            if (newEnd - newStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                                if (startMoved) {
+                                    newStart = (newEnd - SegmentCalculator.MIN_RANGE_SECONDS).coerceAtLeast(0L)
+                                } else {
+                                    newEnd = (newStart + SegmentCalculator.MIN_RANGE_SECONDS).coerceAtMost(totalVideoSeconds)
+                                }
+                            }
+
+                            activeThumbTimeSec = if (startMoved) newStart else newEnd
+                            activeThumbLabel = if (startMoved) "Awal" else "Akhir"
+                            onRangeChanged(newStart, newEnd)
+                        },
+                        valueRange = 0f..totalVideoSeconds.toFloat(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("range_slider_analysis")
+                    )
+
+                    // Keterangan Waktu Rentang di bawah slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Awal: ${SegmentCalculator.formatTimeSeconds(currentRangeStart)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Durasi Video: ${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Akhir: ${SegmentCalculator.formatTimeSeconds(currentRangeEnd)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Isian Waktu Manual (Awal & Akhir) yang tersinkron dengan slider
+                    var startInputText by remember(currentRangeStart) {
+                        mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeStart))
+                    }
+                    var endInputText by remember(currentRangeEnd) {
+                        mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeEnd))
+                    }
+                    var validationErrorMsg by remember { mutableStateOf<String?>(null) }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Input Waktu Awal
+                        OutlinedTextField(
+                            value = startInputText,
+                            onValueChange = { input ->
+                                startInputText = input
+                                val parsedStart = SegmentCalculator.parseTimeSeconds(input)
+                                val parsedEnd = SegmentCalculator.parseTimeSeconds(endInputText) ?: currentRangeEnd
+                                if (parsedStart == null) {
+                                    validationErrorMsg = "Format waktu awal tidak valid (gunakan mm:ss atau h:mm:ss)"
+                                } else if (parsedStart < 0L) {
+                                    validationErrorMsg = "Waktu awal tidak boleh kurang dari 0"
+                                } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                                    validationErrorMsg = "Selisih waktu akhir dan awal minimal 10 detik"
+                                } else if (parsedEnd > totalVideoSeconds) {
+                                    validationErrorMsg = "Waktu akhir melebihi durasi video (${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)})"
+                                } else {
+                                    validationErrorMsg = null
+                                    activeThumbTimeSec = parsedStart
+                                    activeThumbLabel = "Awal"
+                                    onRangeChanged(parsedStart, parsedEnd)
+                                }
+                            },
+                            label = { Text("Waktu Awal", fontSize = 12.sp) },
+                            placeholder = { Text("00:00", fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = validationErrorMsg != null,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_range_start")
+                        )
+
+                        // Input Waktu Akhir
+                        OutlinedTextField(
+                            value = endInputText,
+                            onValueChange = { input ->
+                                endInputText = input
+                                val parsedEnd = SegmentCalculator.parseTimeSeconds(input)
+                                val parsedStart = SegmentCalculator.parseTimeSeconds(startInputText) ?: currentRangeStart
+                                if (parsedEnd == null) {
+                                    validationErrorMsg = "Format waktu akhir tidak valid (gunakan mm:ss atau h:mm:ss)"
+                                } else if (parsedEnd > totalVideoSeconds) {
+                                    validationErrorMsg = "Waktu akhir melebihi durasi video (${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)})"
+                                } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                                    validationErrorMsg = "Selisih waktu akhir dan awal minimal 10 detik"
+                                } else {
+                                    validationErrorMsg = null
+                                    activeThumbTimeSec = parsedEnd
+                                    activeThumbLabel = "Akhir"
+                                    onRangeChanged(parsedStart, parsedEnd)
+                                }
+                            },
+                            label = { Text("Waktu Akhir", fontSize = 12.sp) },
+                            placeholder = { Text(SegmentCalculator.formatTimeSeconds(totalVideoSeconds), fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = validationErrorMsg != null,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("input_range_end")
+                        )
+                    }
+
+                    // Pesan Validasi Error (jika ada)
+                    if (validationErrorMsg != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = "Error",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = validationErrorMsg ?: "",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Tombol Reset ke Seluruh Video
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                validationErrorMsg = null
+                                startInputText = SegmentCalculator.formatTimeSeconds(0L)
+                                endInputText = SegmentCalculator.formatTimeSeconds(totalVideoSeconds)
+                                activeThumbTimeSec = 0L
+                                activeThumbLabel = "Awal"
+                                onRangeChanged(0L, totalVideoSeconds)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("btn_reset_full_video")
+                        ) {
+                            Text("Pilih Seluruh Video", fontSize = 11.sp)
                         }
                     }
                 }
@@ -1439,6 +1822,27 @@ private fun IdleSetupContent(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
+                    // Rentang Analisis
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Rentang Analisis",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = segmentPlanSummary.rangeFormatted,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
                     // 2. Panjang segmen terpilih
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1612,6 +2016,24 @@ private fun IdleSetupContent(
                         lineHeight = 16.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Rentang Analisis",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Seluruh video (default)",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

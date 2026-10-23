@@ -197,6 +197,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var activeAnalysisId: Long? = null
     private var currentJob: Job? = null
 
+    // Rentang analisis video (dalam detik absolut dari awal video)
+    private val _analysisRangeStartSec = MutableStateFlow(0L)
+    val analysisRangeStartSec: StateFlow<Long> = _analysisRangeStartSec.asStateFlow()
+
+    private val _analysisRangeEndSec = MutableStateFlow(0L)
+    val analysisRangeEndSec: StateFlow<Long> = _analysisRangeEndSec.asStateFlow()
+
+    fun setAnalysisRange(startSec: Long, endSec: Long): Boolean {
+        val video = _selectedVideo.value ?: return false
+        val totalSeconds = if (video.durationMs > 0) video.durationMs / 1000 else 1500L
+        val safeStart = startSec.coerceIn(0L, totalSeconds)
+        val safeEnd = endSec.coerceIn(0L, totalSeconds)
+
+        if (safeEnd - safeStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+            Log.w(TAG, "Rentang tidak valid: selisih waktu harus minimal 10 detik ($safeStart to $safeEnd)")
+            return false
+        }
+
+        _analysisRangeStartSec.value = safeStart
+        _analysisRangeEndSec.value = safeEnd
+        Log.i(TAG, "Rentang analisis diatur: ${SegmentCalculator.formatTimeSeconds(safeStart)} - ${SegmentCalculator.formatTimeSeconds(safeEnd)} dari ${SegmentCalculator.formatTimeSeconds(totalSeconds)}")
+        updatePlanSummary()
+        return true
+    }
+
     fun setIntervalSeconds(seconds: Int) {
         if (seconds == 3 || seconds == 5) {
             _promptIntervalSeconds.value = seconds
@@ -215,10 +240,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val video = _selectedVideo.value
         if (video != null) {
             val totalSeconds = if (video.durationMs > 0) video.durationMs / 1000 else 1500L
+            val safeStart = _analysisRangeStartSec.value.coerceIn(0L, totalSeconds)
+            val currentEnd = _analysisRangeEndSec.value
+            val safeEnd = if (currentEnd <= 0L || currentEnd > totalSeconds) totalSeconds else currentEnd
             _segmentPlanSummary.value = SegmentCalculator.calculatePlanSummary(
                 totalSeconds = totalSeconds,
                 option = _segmentDurationOption.value,
-                intervalSeconds = _promptIntervalSeconds.value
+                intervalSeconds = _promptIntervalSeconds.value,
+                rangeStartSec = safeStart,
+                rangeEndSec = safeEnd
             )
         } else {
             _segmentPlanSummary.value = null
@@ -399,6 +429,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "Ditemukan analisis yang belum selesai untuk video ini (ID: ${matchedEntity.id}, tersimpan ${matchedEntity.completedSegmentsCount}/${matchedEntity.totalSegments} segmen). Menampilkan pilihan ke pengguna.")
                 _pendingMatchDialogState.value = PendingMatchDialogState(matchedEntity, video)
             } else {
+                val totalSeconds = if (video.durationMs > 0) video.durationMs / 1000 else 1500L
+                _analysisRangeStartSec.value = 0L
+                _analysisRangeEndSec.value = totalSeconds
                 _selectedVideo.value = video
                 _analysisState.value = AnalysisState.Idle
                 updatePlanSummary()
@@ -428,6 +461,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeMatchedAnalysis() {
         val matchState = _pendingMatchDialogState.value ?: return
         _pendingMatchDialogState.value = null
+        val totalSeconds = if (matchState.newVideo.durationMs > 0) matchState.newVideo.durationMs / 1000 else 1500L
+        _analysisRangeStartSec.value = 0L
+        _analysisRangeEndSec.value = totalSeconds
         _selectedVideo.value = matchState.newVideo
         updatePlanSummary()
         startAnalysis(matchState.entity.id)
@@ -436,6 +472,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startFreshAnalysisWithVideo() {
         val matchState = _pendingMatchDialogState.value ?: return
         _pendingMatchDialogState.value = null
+        val totalSeconds = if (matchState.newVideo.durationMs > 0) matchState.newVideo.durationMs / 1000 else 1500L
+        _analysisRangeStartSec.value = 0L
+        _analysisRangeEndSec.value = totalSeconds
         _selectedVideo.value = matchState.newVideo
         activeAnalysisId = null
         _analysisState.value = AnalysisState.Idle
@@ -448,6 +487,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSelectedVideo() {
         cancelAnalysis()
+        _analysisRangeStartSec.value = 0L
+        _analysisRangeEndSec.value = 0L
         _selectedVideo.value = null
         activeAnalysisId = null
         _analysisState.value = AnalysisState.Idle
@@ -633,7 +674,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         SegmentCalculator.calculateSegments(totalSeconds, opt)
                     }
                 } else {
-                    SegmentCalculator.calculateSegments(totalSeconds, _segmentDurationOption.value)
+                    val safeStart = _analysisRangeStartSec.value.coerceIn(0L, totalSeconds)
+                    val currentEnd = _analysisRangeEndSec.value
+                    val safeEnd = if (currentEnd <= 0L || currentEnd > totalSeconds) totalSeconds else currentEnd
+                    SegmentCalculator.calculateSegments(
+                        totalSeconds = totalSeconds,
+                        option = _segmentDurationOption.value,
+                        rangeStartSec = safeStart,
+                        rangeEndSec = safeEnd
+                    )
                 }
 
                 val totalSegments = segmentSpans.size
