@@ -3,6 +3,7 @@ package com.example.data.api
 import android.content.Context
 import android.util.Log
 import com.example.data.model.CharacterInfo
+import com.example.data.model.NarrationLanguage
 import com.example.data.model.SegmentAnalysisOutput
 import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
@@ -27,7 +28,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class GeminiApiClient(
-    private val apiKeyProvider: () -> String
+    private val apiKeyProvider: () -> String,
+    var onRequestCounted: ((model: String) -> Unit)? = null,
+    var onDailyQuotaExceeded: ((model: String, retryDelaySeconds: Long?) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "RekapinAI"
@@ -205,6 +208,11 @@ class GeminiApiClient(
      * Menunggu pemrosesan berkas video di server Gemini hingga berstatus ACTIVE.
      * Dijalankan sepenuhnya di Dispatchers.IO.
      */
+    /**
+     * Menunggu pemrosesan berkas video di server Gemini hingga berstatus ACTIVE.
+     * Polling setiap 5 detik hingga maksimal 15 menit.
+     * Dijalankan sepenuhnya di Dispatchers.IO.
+     */
     suspend fun waitForFileActive(
         fileName: String,
         onStatusUpdate: (String) -> Unit
@@ -215,11 +223,21 @@ class GeminiApiClient(
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
 
         Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName di thread: ${Thread.currentThread().name}")
-        var attempts = 0
-        val maxAttempts = 60 // 60 x 3 detik = 3 menit batas maksimum polling
+        val startTime = System.currentTimeMillis()
+        val maxDurationMs = 15 * 60 * 1000L // 15 menit
+        val pollIntervalMs = 5000L // 5 detik
 
-        while (attempts < maxAttempts) {
+        var attempts = 0
+        while (System.currentTimeMillis() - startTime < maxDurationMs) {
             attempts++
+            val elapsedMs = System.currentTimeMillis() - startTime
+            val elapsedSec = (elapsedMs / 1000L).coerceAtLeast(0L)
+            val mm = elapsedSec / 60L
+            val ss = elapsedSec % 60L
+            val timeStr = String.format(Locale.US, "%02d:%02d", mm, ss)
+            val statusMsg = "Memproses video di server Google... ($timeStr)"
+            onStatusUpdate(statusMsg)
+
             val request = Request.Builder()
                 .url(statusUrl)
                 .get()
@@ -249,7 +267,7 @@ class GeminiApiClient(
                         val name = json.optString("name", cleanName)
                         val uri = json.optString("uri", "https://generativelanguage.googleapis.com/v1beta/$name")
                         val state = json.optString("state", "PROCESSING")
-                        Log.d(TAG, "[$stageName] Polling [$attempts/$maxAttempts]: state = $state")
+                        Log.d(TAG, "[$stageName] Polling [$attempts] ($timeStr): state = $state")
                         continuation.resume(UploadedFile(name, uri, state))
                     }
                 } catch (e: Exception) {
@@ -260,7 +278,7 @@ class GeminiApiClient(
             if (fileResult != null) {
                 when (fileResult.state) {
                     "ACTIVE" -> {
-                        Log.i(TAG, "[$stageName] Berkas video telah ACTIVE dan siap dianalisis!")
+                        Log.i(TAG, "[$stageName] Berkas video telah ACTIVE dan siap dianalisis! ($timeStr)")
                         onStatusUpdate("Video siap dianalisis (Status: ACTIVE)")
                         return@withContext fileResult
                     }
@@ -270,40 +288,49 @@ class GeminiApiClient(
                             stage = stageName,
                             httpCode = null,
                             rawMessage = "File state: FAILED. Google AI tidak dapat memproses video ini.",
-                            userFriendlyMessage = "Pemrosesan video di server Gemini gagal (Status: FAILED). Format kodek video mungkin tidak didukung."
+                            userFriendlyMessage = "Pemrosesan video di server Google AI gagal (Status: FAILED). Format atau kodek video mungkin tidak didukung oleh server AI. Silakan unggah ulang video untuk mencoba kembali.",
+                            isFileProcessingFailed = true
                         )
                     }
                     else -> {
-                        onStatusUpdate("Memproses file video di Google AI (Status: ${fileResult.state})... [$attempts]")
+                        // Status PROCESSING, lanjutkan tunggu
                     }
                 }
             }
 
-            delay(3000L)
+            delay(pollIntervalMs)
         }
 
+        Log.w(TAG, "[$stageName] Timeout 15 menit terlampaui. File masih berstatus PROCESSING.")
         throw GeminiApiException(
             stage = stageName,
             httpCode = null,
-            rawMessage = "Timeout polling 3 menit terlampaui tanpa status ACTIVE.",
-            userFriendlyMessage = "Batas waktu pemrosesan video habis (timeout 3 menit). Silakan coba lagi."
+            rawMessage = "Batas waktu pemrosesan 15 menit terlampaui. File $cleanName masih PROCESSING.",
+            userFriendlyMessage = "Video masih diproses di server Google setelah 15 menit. Berkas tersimpan di server Google selama 48 jam. Silakan ketuk tombol \"Cek lagi\" untuk memeriksa statusnya kembali tanpa mengunggah ulang.",
+            isFileProcessingTimeout = true
         )
     }
 
+    enum class RemoteFileState {
+        ACTIVE,
+        PROCESSING,
+        FAILED,
+        NOT_FOUND
+    }
+
     /**
-     * Memeriksa apakah berkas video di Gemini API masih berstatus ACTIVE.
-     * Mengembalikan true jika masih aktif dan dapat digunakan kembali tanpa upload ulang.
+     * Memeriksa status terkini berkas di Gemini Files API: ACTIVE, PROCESSING, FAILED, atau NOT_FOUND.
      */
-    suspend fun isFileStillActive(fileName: String): Boolean = withContext(Dispatchers.IO) {
-        if (fileName.isBlank()) return@withContext false
+    suspend fun checkFileRemoteState(fileName: String): RemoteFileState = withContext(Dispatchers.IO) {
+        if (fileName.isBlank()) return@withContext RemoteFileState.NOT_FOUND
         val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
         val apiKey = try {
             getValidApiKey("Cek Status Berkas")
         } catch (_: Exception) {
-            return@withContext false
+            return@withContext RemoteFileState.NOT_FOUND
         }
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
-        Log.i(TAG, "[Cek Status Berkas] Memeriksa apakah $cleanName masih ACTIVE...")
+        Log.i(TAG, "[Cek Status Berkas] Memeriksa status terkini $cleanName...")
 
         val request = Request.Builder().url(statusUrl).get().build()
         try {
@@ -311,18 +338,31 @@ class GeminiApiClient(
             response.use { res ->
                 if (!res.isSuccessful) {
                     Log.d(TAG, "[Cek Status Berkas] Berkas $cleanName tidak dapat diakses (HTTP ${res.code})")
-                    return@withContext false
+                    return@withContext RemoteFileState.NOT_FOUND
                 }
                 val body = res.body?.string().orEmpty()
                 val json = JSONObject(body)
-                val state = json.optString("state", "")
+                val state = json.optString("state", "").uppercase(Locale.US)
                 Log.i(TAG, "[Cek Status Berkas] Status terkini berkas $cleanName: $state")
-                state == "ACTIVE"
+                when (state) {
+                    "ACTIVE" -> RemoteFileState.ACTIVE
+                    "PROCESSING" -> RemoteFileState.PROCESSING
+                    "FAILED" -> RemoteFileState.FAILED
+                    else -> RemoteFileState.PROCESSING
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "[Cek Status Berkas] Gagal memeriksa status berkas: ${e.message}")
-            false
+            RemoteFileState.NOT_FOUND
         }
+    }
+
+    /**
+     * Memeriksa apakah berkas video di Gemini API masih berstatus ACTIVE.
+     * Mengembalikan true jika masih aktif dan dapat digunakan kembali tanpa upload ulang.
+     */
+    suspend fun isFileStillActive(fileName: String): Boolean = withContext(Dispatchers.IO) {
+        checkFileRemoteState(fileName) == RemoteFileState.ACTIVE
     }
 
     /**
@@ -339,6 +379,8 @@ class GeminiApiClient(
         intervalSeconds: Int,
         previousCharacterSheet: List<CharacterInfo>,
         isFirstSegment: Boolean,
+        model: String = GeminiConstants.GEMINI_MODEL,
+        stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
@@ -346,7 +388,7 @@ class GeminiApiClient(
         val stageName = "Analisis Segmen $currentSegment dari $totalSegments ($startFormatted - $endFormatted)"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Memulai analisis offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Memulai analisis model '$model' offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s di thread: ${Thread.currentThread().name}")
         Log.d(TAG, "[$stageName] Karakter yang telah dikenal sebelumnya: ${previousCharacterSheet.map { it.name }}")
 
         val prompt = buildSegmentPrompt(
@@ -356,7 +398,8 @@ class GeminiApiClient(
             endSec = endSec,
             intervalSeconds = intervalSeconds,
             previousCharacterSheet = previousCharacterSheet,
-            isFirstSegment = isFirstSegment
+            isFirstSegment = isFirstSegment,
+            stylePrompt = stylePrompt
         )
 
         val requestPayload = JSONObject().apply {
@@ -393,12 +436,13 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${GeminiConstants.GEMINI_MODEL}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
 
         val responseJsonString = executeWithRetry(
             stage = stageName,
             url = endpoint,
             jsonBody = requestPayload,
+            modelForCounting = model.trim(),
             onStatusUpdate = onStatusUpdate
         )
 
@@ -414,12 +458,14 @@ class GeminiApiClient(
     suspend fun generateFinalNarration(
         segmentSummaries: List<String>,
         characterSheet: List<CharacterInfo>,
+        model: String = GeminiConstants.GEMINI_MODEL,
+        language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         val stageName = "Penyusunan Narasi Rekap Video"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Menyusun narasi dari ${segmentSummaries.size} ringkasan segmen di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Menyusun narasi (${language.displayName}) dari ${segmentSummaries.size} ringkasan segmen model '$model' di thread: ${Thread.currentThread().name}")
 
         val summariesText = segmentSummaries.mapIndexed { idx, sum ->
             "Segment ${idx + 1}: $sum"
@@ -429,7 +475,26 @@ class GeminiApiClient(
             "- ${it.name}: ${it.description}"
         }
 
-        val prompt = """
+        val prompt = if (language == NarrationLanguage.INDONESIAN) {
+            """
+            You are a master anime storyteller and narrator.
+            Based on the chronological progression of this complete anime episode:
+            
+            CHRONOLOGICAL SEGMENTS:
+            $summariesText
+            
+            KEY CHARACTERS:
+            $charactersText
+            
+            INSTRUCTIONS:
+            Write an engaging, fluid, and captivating story recap of the entire episode in natural, highly expressive Bahasa Indonesia (gaya pencerita anime yang hidup, emosional, dramatis, dan mengalir natural, bukan terjemahan harfiah/kaku).
+            - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
+            - Write in natural narrative prose paragraphs (3 to 5 flowing paragraphs) in Indonesian.
+            - Keep official character names and terms intact.
+            - Do NOT use bullet points, robotic scene tags, or dry summaries. Make it read like an exciting, immersive recap for anime fans.
+            """.trimIndent()
+        } else {
+            """
             You are a master anime storyteller and narrator. 
             Based on the chronological progression of this complete anime episode:
             
@@ -444,7 +509,8 @@ class GeminiApiClient(
             - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
             - Write in natural narrative prose paragraphs (3 to 5 flowing paragraphs).
             - Do NOT use bullet points, robotic scene tags, or dry summaries. Make it read like an exciting, immersive recap for anime fans.
-        """.trimIndent()
+            """.trimIndent()
+        }
 
         val requestPayload = JSONObject().apply {
             val contentsArray = JSONArray().apply {
@@ -464,11 +530,12 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${GeminiConstants.GEMINI_MODEL}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
         val rawResponse = executeWithRetry(
             stage = stageName,
             url = endpoint,
             jsonBody = requestPayload,
+            modelForCounting = model.trim(),
             onStatusUpdate = onStatusUpdate
         )
 
@@ -512,6 +579,7 @@ class GeminiApiClient(
         stage: String,
         url: String,
         jsonBody: String,
+        modelForCounting: String? = null,
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         var attempt = 0
@@ -521,6 +589,9 @@ class GeminiApiClient(
 
         while (true) {
             attempt++
+            if (modelForCounting != null) {
+                onRequestCounted?.invoke(modelForCounting)
+            }
             Log.d(TAG, "[$stage] Mengirim permintaan HTTP (Percobaan $attempt) di thread: ${Thread.currentThread().name}...")
 
             val request = Request.Builder()
@@ -556,6 +627,9 @@ class GeminiApiClient(
                 val quotaCheck = QuotaHelper.checkQuotaError(statusCode, responseBody)
                 if (quotaCheck.isDailyQuota) {
                     Log.e(TAG, "[$stage] Kuota harian habis / retryDelay > 5 menit (${quotaCheck.retryDelaySeconds}s). JANGAN retry.")
+                    if (modelForCounting != null) {
+                        onDailyQuotaExceeded?.invoke(modelForCounting, quotaCheck.retryDelaySeconds)
+                    }
                     throw GeminiApiException(
                         stage = stage,
                         httpCode = statusCode,
@@ -645,7 +719,8 @@ class GeminiApiClient(
         endSec: Long,
         intervalSeconds: Int,
         previousCharacterSheet: List<CharacterInfo>,
-        isFirstSegment: Boolean
+        isFirstSegment: Boolean,
+        stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art"
     ): String {
         val sampleTimestamps = if (isFirstSegment) {
             "00:00 - 00:05, 00:05 - 00:10"
@@ -706,13 +781,13 @@ class GeminiApiClient(
                 {
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
-                  "visualPrompt": "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere]."
+                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere]."
                 }
               ]
             }
             
             CRITICAL VISUAL PROMPT RULES:
-            1. Every visualPrompt MUST strictly start with: "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art". Never 3D, never photorealistic.
+            1. Every visualPrompt MUST strictly start with: "$stylePrompt". Follow only the selected style; do not mix other styles.
             2. Repeat the character's exact physical descriptions from the character sheet inside each visual prompt so text-to-image models maintain character consistency across shots.
             3. Each visual prompt must be exactly one descriptive paragraph covering: subject, action, expression, setting, lighting, camera angle, mood.
             4. Do NOT mention any animation studio names or artist names.
@@ -804,19 +879,27 @@ class GeminiApiClient(
         if (quotaCheck.isDailyQuota) {
             return quotaCheck.userMessage
         }
+        if (statusCode == 404) {
+            return "Nama model tidak dikenal, periksa ejaannya"
+        }
         return try {
             val json = JSONObject(errorBody)
             val errorObj = json.optJSONObject("error")
             val msg = errorObj?.optString("message") ?: errorBody
+            if (msg.contains("not found", ignoreCase = true) && (msg.contains("models/", ignoreCase = true) || msg.contains("model", ignoreCase = true))) {
+                return "Nama model tidak dikenal, periksa ejaannya"
+            }
             when (statusCode) {
                 400 -> "Parameter permintaan tidak valid: $msg"
                 401, 403 -> "API Key tidak valid atau tidak diizinkan: $msg"
+                404 -> "Nama model tidak dikenal, periksa ejaannya"
                 429 -> "Batas kuota per menit Gemini terlampaui. Silakan tunggu beberapa saat."
                 503 -> "Layanan Gemini AI sedang sibuk. Silakan coba kembali."
                 else -> msg
             }
         } catch (_: Exception) {
-            if (statusCode == 429) "Batas kuota per menit Gemini terlampaui."
+            if (statusCode == 404) "Nama model tidak dikenal, periksa ejaannya"
+            else if (statusCode == 429) "Batas kuota per menit Gemini terlampaui."
             else if (statusCode == 503) "Layanan Google AI sedang sibuk."
             else "Terjadi kendala pada server (Kode HTTP $statusCode)."
         }

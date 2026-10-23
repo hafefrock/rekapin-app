@@ -7,6 +7,8 @@ class GeminiApiException(
     val userFriendlyMessage: String,
     val isDailyQuota: Boolean = false,
     val retryDelaySeconds: Long? = null,
+    val isFileProcessingTimeout: Boolean = false,
+    val isFileProcessingFailed: Boolean = false,
     cause: Throwable? = null
 ) : Exception(userFriendlyMessage, cause) {
 

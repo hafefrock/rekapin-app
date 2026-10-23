@@ -19,7 +19,9 @@ data class AnimeAnalysisResult(
     val durationFormatted: String,
     val intervalSeconds: Int,
     val videoName: String = "",
-    val note: String = ""
+    val note: String = "",
+    val segmentModels: List<String> = emptyList(),
+    val segmentSummaries: List<String> = emptyList()
 )
 
 data class SegmentAnalysisOutput(

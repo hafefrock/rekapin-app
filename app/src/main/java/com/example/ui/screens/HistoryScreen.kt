@@ -386,6 +386,7 @@ private fun HistoryItemCard(
 @Composable
 fun HistoryDetailScreen(
     entity: AnimeAnalysisEntity,
+    styleName: String = "Anime 2D standar",
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -477,6 +478,7 @@ fun HistoryDetailScreen(
             val result = entity.toAnimeAnalysisResult()
             ResultView(
                 result = result,
+                styleName = styleName,
                 modifier = Modifier.fillMaxSize()
             )
         }

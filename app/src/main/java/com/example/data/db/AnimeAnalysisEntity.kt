@@ -21,10 +21,12 @@ data class AnimeAnalysisEntity(
     val completedSegmentsCount: Int,
     val geminiFileRemoteName: String,
     val geminiFileUri: String,
+    val uploadKeyHash: String = "",
     val status: String, // "COMPLETED", "IN_PROGRESS", "FAILED"
     val characterSheetJson: String,
     val timelineJson: String,
     val segmentSummariesJson: String,
+    val segmentModelsJson: String = "[]",
     val narration: String,
     val lastErrorStage: String = "",
     val lastErrorMessage: String = "",
@@ -61,7 +63,9 @@ data class AnimeAnalysisEntity(
             videoName = videoName,
             note = if (lastErrorMessage == "Segmen terakhir dilewati" || lastErrorStage.contains("dilewati", ignoreCase = true)) {
                 "Segmen terakhir dilewati"
-            } else ""
+            } else "",
+            segmentModels = AnalysisJsonAdapter.jsonToSummaries(segmentModelsJson),
+            segmentSummaries = AnalysisJsonAdapter.jsonToSummaries(segmentSummariesJson)
         )
     }
 }

@@ -7,6 +7,7 @@ import com.example.data.model.AnalysisState
 import com.example.data.model.CharacterInfo
 import com.example.data.model.TimelineItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -415,5 +416,460 @@ class ExampleUnitTest {
         assertEquals(2, error.completedSummaries.size)
         assertEquals(3, error.resumeSegment)
         assertEquals("Kuota harian habis. Coba lagi sekitar 2 jam 15 menit", error.errorMessage)
+    }
+
+    @Test
+    fun testQuotaCheckPerDayDetection() {
+        val bodyWithPerDay = """
+            {
+              "error": {
+                "code": 429,
+                "message": "Resource has been exhausted (e.g. check quota). Quota exceeded for quota metric 'GenerateContent requests' and limit 'GenerateContent requests per day' of service 'generativelanguage.googleapis.com'.",
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                      {
+                        "quotaMetric": "GenerateContentRequestsPerDay"
+                      }
+                    ]
+                  },
+                  {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "82451.78s"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val result = com.example.util.QuotaHelper.checkQuotaError(429, bodyWithPerDay)
+        assertTrue(result.isDailyQuota)
+        assertEquals(82451L, result.retryDelaySeconds)
+        assertTrue(result.userMessage.startsWith("Kuota harian habis. Coba lagi sekitar"))
+        assertTrue(result.formattedWaitTime.contains("jam"))
+    }
+
+    @Test
+    fun testQuotaCheckPerMinuteDetection() {
+        val bodyPerMinute = """
+            {
+              "error": {
+                "code": 429,
+                "message": "Resource has been exhausted: rate limit exceeded per minute.",
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "45s"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val result = com.example.util.QuotaHelper.checkQuotaError(429, bodyPerMinute)
+        org.junit.Assert.assertFalse(result.isDailyQuota)
+        assertEquals(45L, result.retryDelaySeconds)
+    }
+
+    @Test
+    fun testApiKeyItemMaskingAndHash() {
+        val key = "AIzaSyB1234567890abcdefx7Q2"
+        val item = com.example.data.model.ApiKeyItem(
+            name = "Key 1",
+            key = key,
+            isActive = true
+        )
+        assertEquals("AIza...x7Q2", item.maskedKey)
+        assertTrue(item.keyHash.isNotBlank())
+        assertEquals(8, item.keyHash.length)
+    }
+
+    @Test
+    fun testModelStorageDefaultsAndManagement() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        // Bersihkan SharedPreferences untuk menguji kondisi awal bawaan belum ada daftar tersimpan
+        context.getSharedPreferences("rekapin_model_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        val storage = com.example.data.prefs.ModelStorage(context)
+
+        // 1. Jika belum ada daftar tersimpan, getModels() mengembalikan empat model berurutan:
+        // gemini-3.8-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.5-flash-lite
+        val initialModels = storage.getModels()
+        assertEquals(4, initialModels.size)
+        assertEquals("gemini-3.8-flash", initialModels[0])
+        assertEquals("gemini-3.6-flash", initialModels[1])
+        assertEquals("gemini-3.7-flash", initialModels[2])
+        assertEquals("gemini-3.5-flash-lite", initialModels[3])
+
+        // Model terpilih bawaan tetap yang pertama (gemini-3.8-flash)
+        assertEquals("gemini-3.8-flash", storage.getSelectedModel())
+
+        // 2. Pertahankan DEFAULT_MODEL (gemini-3.8-flash) sebagai cadangan
+        assertEquals("gemini-3.8-flash", com.example.data.prefs.ModelStorage.DEFAULT_MODEL)
+
+        // Default auto-switch: mati (false)
+        org.junit.Assert.assertFalse(storage.isAutoSwitchOnQuota())
+
+        // Tambah model bebas
+        storage.addModel("gemini-2.5-pro")
+        storage.addModel("custom-model-test")
+        val updatedModels = storage.getModels()
+        assertTrue(updatedModels.contains("gemini-2.5-pro"))
+        assertTrue(updatedModels.contains("custom-model-test"))
+
+        // Pilih model
+        storage.setSelectedModel("gemini-2.5-pro")
+        assertEquals("gemini-2.5-pro", storage.getSelectedModel())
+
+        // Ubah urutan
+        val idxPro = storage.getModels().indexOf("gemini-2.5-pro")
+        if (idxPro > 0) {
+            storage.moveModel(idxPro, 0)
+            assertEquals("gemini-2.5-pro", storage.getModels().first())
+        }
+
+        // Hapus model
+        storage.deleteModel("custom-model-test")
+        org.junit.Assert.assertFalse(storage.getModels().contains("custom-model-test"))
+
+        // Toggle auto-switch
+        storage.setAutoSwitchOnQuota(true)
+        assertTrue(storage.isAutoSwitchOnQuota())
+    }
+
+    @Test
+    fun testUnrecognizedModel404ErrorParsing() {
+        val client = com.example.data.api.GeminiApiClient(
+            apiKeyProvider = { "fake-key" }
+        )
+
+        // Refleksi parseErrorMessage untuk memverifikasi HTTP 404 dan pesan model tidak dikenal
+        val method = com.example.data.api.GeminiApiClient::class.java.getDeclaredMethod(
+            "parseErrorMessage",
+            String::class.java,
+            Int::class.javaPrimitiveType
+        )
+        method.isAccessible = true
+
+        val error404Json = """
+            {
+              "error": {
+                "code": 404,
+                "message": "models/gemini-invalid is not found for API version v1beta, or is not supported for generateContent.",
+                "status": "NOT_FOUND"
+              }
+            }
+        """.trimIndent()
+
+        val parsedMsg = method.invoke(client, error404Json, 404) as String
+        assertEquals("Nama model tidak dikenal, periksa ejaannya", parsedMsg)
+
+        val nonJson404 = method.invoke(client, "Not Found", 404) as String
+        assertEquals("Nama model tidak dikenal, periksa ejaannya", nonJson404)
+    }
+
+    @Test
+    fun testSegmentModelsInResultAndExport() {
+        val result = com.example.data.model.AnimeAnalysisResult(
+            narration = "Narasi lengkap.",
+            characterSheet = emptyList(),
+            timeline = emptyList(),
+            totalSegments = 2,
+            durationFormatted = "06:00",
+            intervalSeconds = 5,
+            videoName = "Anime.mp4",
+            segmentModels = listOf("gemini-3.8-flash", "gemini-2.5-pro"),
+            segmentSummaries = listOf("Segmen 1 summary", "Segmen 2 summary")
+        )
+
+        assertEquals("gemini-3.8-flash", result.segmentModels[0])
+        assertEquals("gemini-2.5-pro", result.segmentModels[1])
+
+        val fullExport = com.example.ui.components.ExportFormatters.formatFullExport(result)
+        assertTrue(fullExport.contains("D. HASIL RINGKASAN PER SEGMEN"))
+        assertTrue(fullExport.contains("Segmen 1 (Model: gemini-3.8-flash)"))
+        assertTrue(fullExport.contains("Segmen 2 (Model: gemini-2.5-pro)"))
+
+        val segExport = com.example.ui.components.ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)
+        assertTrue(segExport.contains("Segmen 1 [Model: gemini-3.8-flash]"))
+        assertTrue(segExport.contains("Segmen 2 [Model: gemini-2.5-pro]"))
+    }
+
+    @Test
+    fun testNarrationLanguageAndStorage() {
+        // Test NarrationLanguage enum values and parsing
+        assertEquals("English (USA)", com.example.data.model.NarrationLanguage.ENGLISH_USA.displayName)
+        assertEquals("Bahasa Indonesia", com.example.data.model.NarrationLanguage.INDONESIAN.displayName)
+        assertEquals(com.example.data.model.NarrationLanguage.ENGLISH_USA, com.example.data.model.NarrationLanguage.DEFAULT)
+
+        assertEquals(
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            com.example.data.model.NarrationLanguage.fromDisplayName("English (USA)")
+        )
+        assertEquals(
+            com.example.data.model.NarrationLanguage.INDONESIAN,
+            com.example.data.model.NarrationLanguage.fromDisplayName("Bahasa Indonesia")
+        )
+        // Fallback for null or unknown
+        assertEquals(
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            com.example.data.model.NarrationLanguage.fromDisplayName(null)
+        )
+        assertEquals(
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            com.example.data.model.NarrationLanguage.fromDisplayName("Unknown Language")
+        )
+
+        // Test NarrationLanguageStorage persistence
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_language_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.NarrationLanguageStorage(context)
+        // Default must be English (USA)
+        assertEquals(com.example.data.model.NarrationLanguage.ENGLISH_USA, storage.getLanguage())
+        assertEquals("English (USA)", storage.getLanguageDisplayName())
+
+        // Set to Bahasa Indonesia
+        storage.setLanguage(com.example.data.model.NarrationLanguage.INDONESIAN)
+        assertEquals(com.example.data.model.NarrationLanguage.INDONESIAN, storage.getLanguage())
+        assertEquals("Bahasa Indonesia", storage.getLanguageDisplayName())
+
+        // Re-read with a new storage instance to verify persistence in SharedPreferences
+        val reloadedStorage = com.example.data.prefs.NarrationLanguageStorage(context)
+        assertEquals(com.example.data.model.NarrationLanguage.INDONESIAN, reloadedStorage.getLanguage())
+
+        // Switch back to English (USA)
+        reloadedStorage.setLanguage("English (USA)")
+        assertEquals(com.example.data.model.NarrationLanguage.ENGLISH_USA, reloadedStorage.getLanguage())
+    }
+
+    @Test
+    fun testModelUsageStorageDefaultsLimitsAndIncrement() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_model_usage_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.ModelUsageStorage(context)
+
+        // 1. Batas harian default: 20 untuk model biasa, 500 untuk flash-lite
+        assertEquals(20, storage.getDefaultLimit("gemini-3.8-flash"))
+        assertEquals(20, storage.getDefaultLimit("gemini-3.6-flash"))
+        assertEquals(20, storage.getDefaultLimit("gemini-3.7-flash"))
+        assertEquals(500, storage.getDefaultLimit("gemini-3.5-flash-lite"))
+        assertEquals(500, storage.getDefaultLimit("models/GEMINI-2.5-FLASH-LITE-preview"))
+
+        // Batas default tersimpan
+        assertEquals(20, storage.getLimit("gemini-3.8-flash"))
+        assertEquals(500, storage.getLimit("gemini-3.5-flash-lite"))
+
+        // Edit batas harian
+        storage.setLimit("gemini-3.8-flash", 50)
+        assertEquals(50, storage.getLimit("gemini-3.8-flash"))
+
+        // Initial usage: 0
+        assertEquals(0, storage.getUsage("gemini-3.8-flash"))
+        val infoBefore = storage.getUsageInfo("gemini-3.8-flash")
+        assertEquals(0, infoBefore.used)
+        assertEquals(50, infoBefore.limit)
+        assertEquals(50, infoBefore.remaining)
+        org.junit.Assert.assertFalse(infoBefore.isQuotaExceeded)
+
+        // Increment usage
+        val count1 = storage.incrementUsage("gemini-3.8-flash")
+        assertEquals(1, count1)
+        val count2 = storage.incrementUsage("gemini-3.8-flash")
+        assertEquals(2, count2)
+        assertEquals(2, storage.getUsage("gemini-3.8-flash"))
+
+        val infoAfter = storage.getUsageInfo("gemini-3.8-flash")
+        assertEquals(2, infoAfter.used)
+        assertEquals(48, infoAfter.remaining)
+        assertTrue(infoAfter.resetTimeFormatted.startsWith("~") || infoAfter.resetTimeFormatted.startsWith("besok ~"))
+    }
+
+    @Test
+    fun testModelUsageStorageQuotaExceededAndRetryDelayReset() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_model_usage_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.ModelUsageStorage(context)
+        val model = "gemini-3.8-flash"
+
+        // Set quota exceeded dengan retryDelay 3600 detik (1 jam)
+        storage.markQuotaExceeded(model, 3600L)
+        val usageInfo = storage.getUsageInfo(model)
+
+        // Hitungan menjadi penuh
+        assertEquals(20, usageInfo.used)
+        assertEquals(0, usageInfo.remaining)
+        assertTrue(usageInfo.isQuotaExceeded)
+
+        // Waktu reset harus menggunakan retryDelay (~1 jam dari sekarang), bukan tengah malam Pasifik
+        val resetEpoch = storage.getResetEpochMillis(model)
+        val expectedMinEpoch = System.currentTimeMillis() + 3500_000L
+        val expectedMaxEpoch = System.currentTimeMillis() + 3700_000L
+        assertTrue("Reset epoch should be within 1 hour", resetEpoch in expectedMinEpoch..expectedMaxEpoch)
+
+        // Atur manual hitungan ke 5
+        storage.setUsage(model, 5)
+        assertEquals(5, storage.getUsage(model))
+        assertEquals(15, storage.getUsageInfo(model).remaining)
+    }
+
+    @Test
+    fun testModelUsageStoragePacificDateAutoReset() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val prefs = context.getSharedPreferences("rekapin_model_usage_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+
+        val storage = com.example.data.prefs.ModelUsageStorage(context)
+        val model = "gemini-3.6-flash"
+
+        // Simpan hitungan dengan tanggal hari kemarin (kemarin di Pasifik)
+        prefs.edit()
+            .putInt("usage_count_$model", 18)
+            .putString("usage_date_$model", "2020-01-01")
+            .commit()
+
+        // Saat dibaca, karena tanggal Pasifik berbeda, hitungan harus otomatis di-reset ke 0!
+        assertEquals(0, storage.getUsage(model))
+        assertEquals(20, storage.getUsageInfo(model).remaining)
+    }
+
+    @Test
+    fun testVisualStyleStorageBuiltInStyles() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_visual_styles", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.VisualStyleStorage(context)
+        val styles = storage.getAllStyles()
+
+        assertEquals(8, styles.size)
+        assertEquals("Anime 2D standar", styles[0].name)
+        assertEquals("Shonen (aksi)", styles[1].name)
+        assertEquals("Shoujo (romantis)", styles[2].name)
+        assertEquals("Seinen (dewasa)", styles[3].name)
+        assertEquals("Slice of life (lembut)", styles[4].name)
+        assertEquals("Retro 90-an", styles[5].name)
+        assertEquals("Komedi / chibi", styles[6].name)
+        assertEquals("Fantasi gelap", styles[7].name)
+
+        // Default selected style is "Anime 2D standar"
+        val selected = storage.getSelectedStyle()
+        assertEquals("Anime 2D standar", selected.name)
+        assertTrue(selected.isBuiltIn)
+    }
+
+    @Test
+    fun testVisualStyleStorageCustomCRUDAndSelection() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_visual_styles", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.VisualStyleStorage(context)
+
+        // 1. Tambah gaya kustom
+        val customStyle = storage.addCustomStyle(
+            name = "Mecha Cyberpunk",
+            promptDescription = "2D Japanese cyberpunk mecha style, neon lighting, gritty mechanical details"
+        )
+        assertNotNull(customStyle)
+        org.junit.Assert.assertFalse(customStyle.isBuiltIn)
+
+        val allStyles = storage.getAllStyles()
+        assertEquals(9, allStyles.size)
+        assertEquals("Mecha Cyberpunk", allStyles.last().name)
+
+        // 2. Pilih gaya kustom
+        storage.setSelectedStyle(customStyle)
+        assertEquals(customStyle.id, storage.getSelectedStyle().id)
+
+        // 3. Ubah gaya kustom
+        val updated = storage.updateCustomStyle(
+            id = customStyle.id,
+            name = "Mecha Cyberpunk HD",
+            promptDescription = "2D Japanese cyberpunk anime style with glowing neon"
+        )
+        assertTrue(updated)
+        assertEquals("Mecha Cyberpunk HD", storage.getSelectedStyle().name)
+
+        // 4. Hapus gaya kustom
+        val deleted = storage.deleteStyle(customStyle.id)
+        assertTrue(deleted)
+        assertEquals(8, storage.getAllStyles().size)
+        // Setelah dihapus, gaya terpilih kembali ke bawaan
+        assertEquals("Anime 2D standar", storage.getSelectedStyle().name)
+
+        // 5. Coba hapus gaya bawaan (tidak boleh terhapus)
+        val builtInDelete = storage.deleteStyle("builtin_shonen")
+        org.junit.Assert.assertFalse(builtInDelete)
+        assertEquals(8, storage.getAllStyles().size)
+    }
+
+    @Test
+    fun testVisualStylePerAnalysisIsolation() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("rekapin_visual_styles", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+
+        val storage = com.example.data.prefs.VisualStyleStorage(context)
+        val shonen = storage.getAllStyles().first { it.id == "builtin_shonen_action" }
+        val retro = storage.getAllStyles().first { it.id == "builtin_retro_90s" }
+
+        // Simpan gaya shonen untuk analisis ID 100
+        storage.saveStyleForAnalysis(100L, shonen)
+
+        // Ubah gaya terpilih global menjadi retro
+        storage.setSelectedStyle(retro)
+        assertEquals("Retro 90-an", storage.getSelectedStyle().name)
+
+        // Gaya untuk analisis ID 100 harus tetap shonen, tidak terpengaruh pilihan global terbaru
+        val retrievedStyle = storage.getStyleForAnalysis(100L)
+        assertNotNull(retrievedStyle)
+        assertEquals("Shonen (aksi)", retrievedStyle?.name)
+        assertEquals(shonen.promptDescription, retrievedStyle?.promptDescription)
+    }
+
+    @Test
+    fun testGeminiApiClientPromptUsesSelectedStyle() {
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "dummy-key" })
+
+        val method = com.example.data.api.GeminiApiClient::class.java.getDeclaredMethod(
+            "buildSegmentPrompt",
+            String::class.java,
+            String::class.java,
+            Long::class.javaPrimitiveType,
+            Long::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            List::class.java,
+            Boolean::class.javaPrimitiveType,
+            String::class.java
+        )
+        method.isAccessible = true
+
+        val customPromptDesc = "2D Japanese dark fantasy anime style, dramatic chiaroscuro lighting"
+        val prompt = method.invoke(
+            client,
+            "00:00",
+            "03:00",
+            0L,
+            180L,
+            5,
+            emptyList<com.example.data.model.CharacterInfo>(),
+            true,
+            customPromptDesc
+        ) as String
+
+        // Memastikan prompt mengandung deskripsi gaya terpilih
+        assertTrue("Prompt harus memuat deskripsi gaya visual yang dipilih", prompt.contains(customPromptDesc))
+        // Memastikan aturan kepatuhan gaya baru ada
+        assertTrue(
+            "Prompt harus berisi aturan pembatasan gaya",
+            prompt.contains("Follow only the selected style; do not mix other styles")
+        )
+        // Memastikan teks lama "Never 3D, never photorealistic" sudah tidak ada
+        org.junit.Assert.assertFalse(
+            "Prompt tidak boleh mengandung kalimat lama 'Never 3D, never photorealistic'",
+            prompt.contains("Never 3D, never photorealistic")
+        )
     }
 }

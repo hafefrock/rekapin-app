@@ -19,8 +19,17 @@ import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
+import com.example.data.model.ApiKeyItem
+import com.example.data.model.ModelUsageInfo
+import com.example.data.model.NarrationLanguage
+import com.example.data.model.VisualStyle
 import com.example.data.prefs.ApiKeyStorage
+import com.example.data.prefs.ModelStorage
+import com.example.data.prefs.ModelUsageStorage
+import com.example.data.prefs.NarrationLanguageStorage
+import com.example.data.prefs.VisualStyleStorage
 import com.example.data.repository.AnimeAnalysisRepository
+import com.example.service.AnalysisForegroundService
 import com.example.util.SegmentCalculator
 import com.example.util.SegmentDurationOption
 import com.example.util.SegmentPlanSummary
@@ -46,9 +55,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context: Context get() = getApplication()
     val apiKeyStorage = ApiKeyStorage(context)
+    val modelStorage = ModelStorage(context)
+    val narrationLanguageStorage = NarrationLanguageStorage(context)
+    val modelUsageStorage = ModelUsageStorage(context)
+    val visualStyleStorage = VisualStyleStorage(context)
 
     private val geminiClient = GeminiApiClient(
-        apiKeyProvider = { apiKeyStorage.getEffectiveApiKey() }
+        apiKeyProvider = { apiKeyStorage.getEffectiveApiKey() },
+        onRequestCounted = { modelName ->
+            modelUsageStorage.incrementUsage(modelName)
+            refreshSelectedModelUsage()
+        },
+        onDailyQuotaExceeded = { modelName, retryDelaySeconds ->
+            modelUsageStorage.markQuotaExceeded(modelName, retryDelaySeconds)
+            refreshSelectedModelUsage()
+        }
     )
 
     private val database = AppDatabase.getDatabase(application)
@@ -90,6 +111,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isSettingsOpen = MutableStateFlow(false)
     val isSettingsOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+
+    private val _apiKeys = MutableStateFlow<List<ApiKeyItem>>(apiKeyStorage.getAllKeys())
+    val apiKeys: StateFlow<List<ApiKeyItem>> = _apiKeys.asStateFlow()
+
+    private val _activeKeyName = MutableStateFlow(apiKeyStorage.getActiveKeyName())
+    val activeKeyName: StateFlow<String> = _activeKeyName.asStateFlow()
+
+    // Model Gemini
+    private val _models = MutableStateFlow<List<String>>(modelStorage.getModels())
+    val models: StateFlow<List<String>> = _models.asStateFlow()
+
+    private val _selectedModel = MutableStateFlow(modelStorage.getSelectedModel())
+    val selectedModel: StateFlow<String> = _selectedModel.asStateFlow()
+
+    private val _isAutoSwitchModel = MutableStateFlow(modelStorage.isAutoSwitchOnQuota())
+    val isAutoSwitchModel: StateFlow<Boolean> = _isAutoSwitchModel.asStateFlow()
+
+    // Bahasa Narasi
+    private val _narrationLanguage = MutableStateFlow(narrationLanguageStorage.getLanguage())
+    val narrationLanguage: StateFlow<NarrationLanguage> = _narrationLanguage.asStateFlow()
+
+    // Penggunaan & Kuota Model Terpilih Hari Ini
+    private val _selectedModelUsage = MutableStateFlow(modelUsageStorage.getUsageInfo(modelStorage.getSelectedModel()))
+    val selectedModelUsage: StateFlow<ModelUsageInfo> = _selectedModelUsage.asStateFlow()
+
+    fun refreshSelectedModelUsage() {
+        _selectedModelUsage.value = modelUsageStorage.getUsageInfo(modelStorage.getSelectedModel())
+    }
+
+    // Gaya Visual (Preset bawaan & Buatan sendiri)
+    private val _visualStyles = MutableStateFlow<List<VisualStyle>>(visualStyleStorage.getAllStyles())
+    val visualStyles: StateFlow<List<VisualStyle>> = _visualStyles.asStateFlow()
+
+    private val _selectedStyle = MutableStateFlow<VisualStyle>(visualStyleStorage.getSelectedStyle())
+    val selectedStyle: StateFlow<VisualStyle> = _selectedStyle.asStateFlow()
+
+    fun selectStyle(style: VisualStyle) {
+        visualStyleStorage.setSelectedStyleId(style.id)
+        _selectedStyle.value = visualStyleStorage.getSelectedStyle()
+    }
+
+    fun addCustomStyle(name: String, promptDescription: String): VisualStyle {
+        val created = visualStyleStorage.addCustomStyle(name, promptDescription)
+        refreshVisualStyles()
+        selectStyle(created)
+        return created
+    }
+
+    fun updateCustomStyle(id: String, name: String, promptDescription: String): Boolean {
+        val ok = visualStyleStorage.updateCustomStyle(id, name, promptDescription)
+        refreshVisualStyles()
+        _selectedStyle.value = visualStyleStorage.getSelectedStyle()
+        return ok
+    }
+
+    fun deleteCustomStyle(id: String): Boolean {
+        val ok = visualStyleStorage.deleteCustomStyle(id)
+        refreshVisualStyles()
+        _selectedStyle.value = visualStyleStorage.getSelectedStyle()
+        return ok
+    }
+
+    fun refreshVisualStyles() {
+        _visualStyles.value = visualStyleStorage.getAllStyles()
+    }
+
+    fun getStyleForAnalysis(analysisId: Long): VisualStyle {
+        return visualStyleStorage.getStyleForAnalysis(analysisId) ?: VisualStyleStorage.DEFAULT_STYLE
+    }
+
+    fun getStyleNameForAnalysis(analysisId: Long): String {
+        return getStyleForAnalysis(analysisId).name
+    }
 
     // Layar Riwayat
     private val _isHistoryOpen = MutableStateFlow(false)
@@ -171,10 +265,111 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshApiKeys() {
+        _apiKeys.value = apiKeyStorage.getAllKeys()
+        _activeKeyName.value = apiKeyStorage.getActiveKeyName()
+    }
+
+    fun addApiKey(name: String, key: String) {
+        apiKeyStorage.addKey(name, key)
+        refreshApiKeys()
+        Log.i(TAG, "API Key baru '$name' ditambahkan")
+    }
+
+    fun renameApiKey(id: String, newName: String) {
+        apiKeyStorage.renameKey(id, newName)
+        refreshApiKeys()
+        Log.i(TAG, "API Key ID $id diganti nama menjadi '$newName'")
+    }
+
+    fun deleteApiKey(id: String) {
+        apiKeyStorage.deleteKey(id)
+        refreshApiKeys()
+        Log.i(TAG, "API Key ID $id dihapus")
+    }
+
+    fun setActiveApiKey(id: String) {
+        apiKeyStorage.setActiveKey(id)
+        refreshApiKeys()
+        Log.i(TAG, "Key aktif diubah menjadi: ${_activeKeyName.value}")
+    }
+
+    fun switchKeyAndResume(keyId: String, analysisId: Long?) {
+        setActiveApiKey(keyId)
+        Log.i(TAG, "Beralih ke key ${_activeKeyName.value} dan langsung melanjutkan analisis ID $analysisId")
+        startAnalysis(resumeId = analysisId, forceReupload = false)
+    }
+
+    fun addKeyAndResume(name: String, key: String, analysisId: Long?) {
+        val newKey = apiKeyStorage.addKey(name, key)
+        setActiveApiKey(newKey.id)
+        Log.i(TAG, "Menambahkan key baru '${newKey.name}' dan langsung melanjutkan analisis ID $analysisId")
+        startAnalysis(resumeId = analysisId, forceReupload = false)
+    }
+
     fun saveApiKey(newKey: String) {
         apiKeyStorage.saveApiKey(newKey)
+        refreshApiKeys()
         Log.i(TAG, "API Key baru disimpan (panjang: ${newKey.length} karakter)")
         closeSettings()
+    }
+
+    fun refreshModels() {
+        _models.value = modelStorage.getModels()
+        _selectedModel.value = modelStorage.getSelectedModel()
+        _isAutoSwitchModel.value = modelStorage.isAutoSwitchOnQuota()
+        refreshSelectedModelUsage()
+    }
+
+    fun setSelectedModel(modelName: String) {
+        modelStorage.setSelectedModel(modelName)
+        refreshModels()
+        Log.i(TAG, "Model terpilih diubah menjadi: $modelName")
+    }
+
+    fun addModel(modelName: String) {
+        if (modelStorage.addModel(modelName)) {
+            refreshModels()
+            Log.i(TAG, "Model '$modelName' ditambahkan")
+        }
+    }
+
+    fun deleteModel(modelName: String) {
+        if (modelStorage.deleteModel(modelName)) {
+            refreshModels()
+            Log.i(TAG, "Model '$modelName' dihapus")
+        }
+    }
+
+    fun moveModel(fromIndex: Int, toIndex: Int) {
+        if (modelStorage.moveModel(fromIndex, toIndex)) {
+            refreshModels()
+            Log.i(TAG, "Model dipindahkan dari indeks $fromIndex ke $toIndex")
+        }
+    }
+
+    fun toggleAutoSwitchModel(enabled: Boolean) {
+        modelStorage.setAutoSwitchOnQuota(enabled)
+        refreshModels()
+        Log.i(TAG, "Pindah otomatis model diatur ke: $enabled")
+    }
+
+    fun setModelLimit(model: String, limit: Int) {
+        modelUsageStorage.setLimit(model, limit)
+        refreshSelectedModelUsage()
+        Log.i(TAG, "Batas harian model $model diatur ke: $limit")
+    }
+
+    fun setModelUsage(model: String, usage: Int) {
+        modelUsageStorage.setUsage(model, usage)
+        refreshSelectedModelUsage()
+        Log.i(TAG, "Hitungan kuota manual model $model diatur ke: $usage")
+    }
+
+    fun setNarrationLanguage(language: NarrationLanguage) {
+        narrationLanguageStorage.setLanguage(language)
+        _narrationLanguage.value = narrationLanguageStorage.getLanguage()
+        Log.i(TAG, "Bahasa narasi diatur ke: ${language.displayName}")
     }
 
     /**
@@ -270,6 +465,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelAnalysis() {
         Log.i(TAG, "Membatalkan analisis aktif...")
+        AnalysisForegroundService.stop(context)
         currentJob?.cancel()
         currentJob = null
 
@@ -315,9 +511,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         currentJob?.cancel()
+        val currentModel = modelStorage.getSelectedModel()
+        AnalysisForegroundService.onCancelRequested = {
+            cancelAnalysis()
+        }
+        AnalysisForegroundService.start(
+            context = context,
+            model = currentModel,
+            title = if (resumeId != null) "Melanjutkan Analisis Video" else "Memulai Analisis Video",
+            message = "Sedang menyiapkan berkas video..."
+        )
+
         currentJob = viewModelScope.launch {
             var currentStage = "Mempersiapkan Berkas"
             var activeEntityId: Long? = resumeId ?: activeAnalysisId
+            var remoteFileName = ""
+            var remoteFileUri = ""
 
             try {
                 var existingEntity: AnimeAnalysisEntity? = null
@@ -434,24 +643,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val allCharacterSheet = mutableListOf<CharacterInfo>()
                 val allTimeline = mutableListOf<TimelineItem>()
                 val segmentSummaries = mutableListOf<String>()
+                val segmentModels = mutableListOf<String>()
                 var startIndex = 0
-                var remoteFileName = ""
-                var remoteFileUri = ""
+
+                val activeStyle: VisualStyle = if (existingEntity != null) {
+                    visualStyleStorage.getStyleForAnalysis(existingEntity.id)
+                        ?: visualStyleStorage.getSelectedStyle().also {
+                            visualStyleStorage.saveStyleForAnalysis(existingEntity.id, it)
+                        }
+                } else {
+                    visualStyleStorage.getSelectedStyle()
+                }
 
                 // Jika Melanjutkan dari database
                 if (existingEntity != null) {
                     activeEntityId = existingEntity.id
                     activeAnalysisId = existingEntity.id
+                    if (!forceReupload) {
+                        remoteFileName = existingEntity.geminiFileRemoteName
+                        remoteFileUri = existingEntity.geminiFileUri
+                    }
                     if (existingEntity.completedSegmentsCount > 0 && existingEntity.completedSegmentsCount < totalSegments) {
                         startIndex = existingEntity.completedSegmentsCount
                         allCharacterSheet.addAll(AnalysisJsonAdapter.jsonToCharacterSheet(existingEntity.characterSheetJson))
                         allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
                         segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
-                        if (!forceReupload) {
-                            remoteFileName = existingEntity.geminiFileRemoteName
-                            remoteFileUri = existingEntity.geminiFileUri
-                        }
-                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan.")
+                        segmentModels.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentModelsJson))
+                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan. Gaya: ${activeStyle.name}")
                     }
                 } else {
                     // Buat rekaman awal baru di Room database dengan rencana segmen tersimpan
@@ -466,37 +684,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         completedSegmentsCount = 0,
                         geminiFileRemoteName = "",
                         geminiFileUri = "",
+                        uploadKeyHash = apiKeyStorage.getActiveKeyHash(),
                         status = "IN_PROGRESS",
                         characterSheetJson = "[]",
                         timelineJson = "[]",
                         segmentSummariesJson = "[]",
+                        segmentModelsJson = "[]",
                         narration = "",
                         segmentPlanJson = AnalysisJsonAdapter.segmentPlanToJson(segmentSpans),
                         segmentDurationMode = _segmentDurationOption.value.name
                     )
                     activeEntityId = repository.insert(newEntity)
                     activeAnalysisId = activeEntityId
-                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId dengan rencana $totalSegments segmen")
+                    visualStyleStorage.saveStyleForAnalysis(activeEntityId, activeStyle)
+                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId dengan rencana $totalSegments segmen, gaya: ${activeStyle.name}")
                 }
 
-                // Validasi File di Gemini API: Cek apakah masih ACTIVE
+                // Validasi File di Gemini API: Cek apakah masih ACTIVE dan apakah key aktif masih sama
                 currentStage = "Verifikasi Status Berkas di Gemini API"
-                _analysisState.value = AnalysisState.Preparing("Memeriksa status video di Google AI...")
-                var needUpload = false
+                val currentKeyHash = apiKeyStorage.getActiveKeyHash()
+                val savedKeyHash = existingEntity?.uploadKeyHash.orEmpty()
+                val isKeyChanged = savedKeyHash.isNotBlank() && currentKeyHash.isNotBlank() && savedKeyHash != currentKeyHash
 
-                if (!forceReupload && remoteFileName.isNotBlank()) {
-                    val isStillActive = geminiClient.isFileStillActive(remoteFileName)
-                    if (!isStillActive) {
-                        Log.w(TAG, "Berkas $remoteFileName di Gemini telah kedaluwarsa atau tidak aktif. Perlu unggah ulang.")
-                        needUpload = true
-                    } else {
-                        Log.i(TAG, "Berkas $remoteFileName di Gemini masih ACTIVE. Siap langsung digunakan kembali.")
+                _analysisState.value = AnalysisState.Preparing(
+                    if (isKeyChanged) "Key berubah, mengunggah ulang video..." else "Memeriksa status video di Google AI..."
+                )
+                var needUpload = false
+                var needWaitActive = false
+
+                if (forceReupload || isKeyChanged) {
+                    if (isKeyChanged) {
+                        Log.i(TAG, "Key aktif ($currentKeyHash) berbeda dari key saat upload ($savedKeyHash). Mengunggah ulang video otomatis.")
+                    }
+                    needUpload = true
+                } else if (remoteFileName.isNotBlank()) {
+                    val remoteState = geminiClient.checkFileRemoteState(remoteFileName)
+                    when (remoteState) {
+                        GeminiApiClient.RemoteFileState.ACTIVE -> {
+                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih ACTIVE. Siap langsung digunakan kembali.")
+                            needUpload = false
+                            needWaitActive = false
+                        }
+                        GeminiApiClient.RemoteFileState.PROCESSING -> {
+                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih PROCESSING. Melanjutkan tunggu tanpa upload ulang...")
+                            needUpload = false
+                            needWaitActive = true
+                        }
+                        GeminiApiClient.RemoteFileState.FAILED -> {
+                            Log.e(TAG, "Berkas $remoteFileName di Gemini berstatus FAILED.")
+                            throw GeminiApiException(
+                                stage = "Verifikasi Status Berkas",
+                                httpCode = null,
+                                rawMessage = "File state: FAILED di server Google AI.",
+                                userFriendlyMessage = "Pemrosesan video di server Google AI gagal (Status: FAILED). Format atau kodek video mungkin tidak didukung oleh server AI. Silakan unggah ulang video untuk mencoba kembali.",
+                                isFileProcessingFailed = true
+                            )
+                        }
+                        GeminiApiClient.RemoteFileState.NOT_FOUND -> {
+                            Log.w(TAG, "Berkas $remoteFileName di Gemini telah kedaluwarsa atau tidak ditemukan (>48 jam). Mengunggah ulang video...")
+                            needUpload = true
+                        }
                     }
                 } else {
                     needUpload = true
                 }
 
-                // Jika perlu upload ulang (awal baru atau file lama expired atau forceReupload)
+                // Jika perlu upload ulang (awal baru, file lama expired, forceReupload, atau key aktif berbeda)
                 if (needUpload) {
                     currentStage = "Upload Video ke Gemini File API"
                     Log.i(TAG, "[$currentStage] Mengunggah ${video.sizeBytes} bytes secara streaming...")
@@ -508,26 +761,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 progressPercent = percent,
                                 bytesSent = sent,
                                 totalBytes = total,
-                                message = if (startIndex > 0)
+                                message = if (isKeyChanged)
+                                    "Key berubah, mengunggah ulang video ($percent%)..."
+                                else if (startIndex > 0)
                                     "Mengunggah ulang video untuk melanjutkan segmen ${startIndex + 1} ($percent%)..."
                                 else
                                     "Mengunggah video ke Gemini File API ($percent%)..."
                             )
+                            if (percent % 10 == 0 || percent == 100) {
+                                AnalysisForegroundService.updateStatus(
+                                    context = context,
+                                    title = "Mengunggah Video ($percent%)",
+                                    message = "Mengunggah berkas video ke Google AI...",
+                                    model = currentModel
+                                )
+                            }
                         }
                     )
 
-                    currentStage = "Menunggu Status Video ACTIVE"
-                    _analysisState.value = AnalysisState.PollingFileStatus(
-                        "Menunggu verifikasi status video di server AI..."
-                    )
-                    val activeFile = geminiClient.waitForFileActive(uploadedFile.name) { statusMsg ->
-                        _analysisState.value = AnalysisState.PollingFileStatus(statusMsg)
-                    }
+                    remoteFileName = uploadedFile.name
+                    remoteFileUri = uploadedFile.uri
 
-                    remoteFileName = activeFile.name
-                    remoteFileUri = activeFile.uri
-
-                    // Update informasi file remote ke database
+                    // Simpan nama berkas remote dan hash key aktif ke Room segera setelah upload selesai
                     activeEntityId?.let { id ->
                         val ent = repository.getAnalysisById(id)
                         if (ent != null) {
@@ -535,12 +790,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 ent.copy(
                                     geminiFileRemoteName = remoteFileName,
                                     geminiFileUri = remoteFileUri,
+                                    uploadKeyHash = currentKeyHash,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                    needWaitActive = true
+                }
+
+                if (needWaitActive) {
+                    currentStage = "Menunggu Status Video ACTIVE"
+                    val pollingInitialMsg = "Memproses video di server Google... (00:00)"
+                    _analysisState.value = AnalysisState.PollingFileStatus(pollingInitialMsg)
+                    AnalysisForegroundService.updateStatus(
+                        context = context,
+                        title = "Memproses Berkas di AI",
+                        message = pollingInitialMsg,
+                        model = currentModel
+                    )
+                    val activeFile = geminiClient.waitForFileActive(remoteFileName) { statusMsg ->
+                        _analysisState.value = AnalysisState.PollingFileStatus(statusMsg)
+                        AnalysisForegroundService.updateStatus(
+                            context = context,
+                            title = "Memproses Berkas di AI",
+                            message = statusMsg,
+                            model = currentModel
+                        )
+                    }
+
+                    remoteFileName = activeFile.name
+                    remoteFileUri = activeFile.uri
+
+                    // Update informasi file remote dan identitas key saat upload (hash singkat) ke database
+                    activeEntityId?.let { id ->
+                        val ent = repository.getAnalysisById(id)
+                        if (ent != null) {
+                            repository.update(
+                                ent.copy(
+                                    geminiFileRemoteName = remoteFileName,
+                                    geminiFileUri = remoteFileUri,
+                                    uploadKeyHash = currentKeyHash,
+                                    status = "IN_PROGRESS",
+                                    lastErrorStage = "",
+                                    lastErrorMessage = "",
                                     updatedAt = System.currentTimeMillis()
                                 )
                             )
                         }
                     }
                 }
+
+                // Model terpilih saat analisis dimulai atau dilanjutkan
+                val selectedModelName = modelStorage.getSelectedModel()
+                val modelList = modelStorage.getModels().ifEmpty { listOf(selectedModelName) }
+                val isAutoSwitch = modelStorage.isAutoSwitchOnQuota()
+                var currentModelIndex = modelList.indexOf(selectedModelName).coerceAtLeast(0)
+                var activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
+                Log.i(TAG, "Memulai analisis dengan model '$activeModel' (auto-switch: $isAutoSwitch, daftar: $modelList)")
 
                 // Loop Analisis per segmen (mulai dari startIndex - segmen tersimpan TIDAK dianalisis ulang)
                 for (i in startIndex until totalSegments) {
@@ -550,84 +857,168 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val timeRange = "${formatSeconds(startSec)} - ${formatSeconds(endSec)}"
                     currentStage = "Analisis Segmen ${i + 1} dari $totalSegments ($timeRange)"
 
-                    Log.i(TAG, "[$currentStage] Memulai analisis...")
-                    _analysisState.value = AnalysisState.AnalyzingSegment(
-                        currentSegment = i + 1,
-                        totalSegments = totalSegments,
-                        timeRange = timeRange,
-                        message = "Menganalisis segmen ${i + 1} dari $totalSegments ($timeRange)..."
-                    )
+                    var segmentSuccess = false
+                    var lastQuotaException: GeminiApiException? = null
 
-                    val segmentOutput = geminiClient.analyzeSegment(
-                        currentSegment = i + 1,
-                        totalSegments = totalSegments,
-                        fileUri = remoteFileUri,
-                        mimeType = video.mimeType,
-                        startSec = startSec,
-                        endSec = endSec,
-                        intervalSeconds = _promptIntervalSeconds.value,
-                        previousCharacterSheet = allCharacterSheet,
-                        isFirstSegment = (i == 0),
-                        onStatusUpdate = { statusMsg ->
-                            _analysisState.value = AnalysisState.AnalyzingSegment(
+                    while (!segmentSuccess) {
+                        activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
+                        Log.i(TAG, "[$currentStage] Memulai analisis dengan model '$activeModel'...")
+                        _analysisState.value = AnalysisState.AnalyzingSegment(
+                            currentSegment = i + 1,
+                            totalSegments = totalSegments,
+                            timeRange = timeRange,
+                            message = "Menganalisis segmen ${i + 1} dari $totalSegments ($timeRange)...",
+                            modelName = activeModel
+                        )
+                        AnalysisForegroundService.updateProgress(
+                            context = context,
+                            currentSegment = i + 1,
+                            totalSegments = totalSegments,
+                            model = activeModel,
+                            message = "Menganalisis rentang $timeRange"
+                        )
+
+                        try {
+                            val segmentOutput = geminiClient.analyzeSegment(
                                 currentSegment = i + 1,
                                 totalSegments = totalSegments,
-                                timeRange = timeRange,
-                                message = statusMsg
+                                fileUri = remoteFileUri,
+                                mimeType = video.mimeType,
+                                startSec = startSec,
+                                endSec = endSec,
+                                intervalSeconds = _promptIntervalSeconds.value,
+                                previousCharacterSheet = allCharacterSheet,
+                                isFirstSegment = (i == 0),
+                                model = activeModel,
+                                stylePrompt = activeStyle.promptDescription,
+                                onStatusUpdate = { statusMsg ->
+                                    _analysisState.value = AnalysisState.AnalyzingSegment(
+                                        currentSegment = i + 1,
+                                        totalSegments = totalSegments,
+                                        timeRange = timeRange,
+                                        message = statusMsg,
+                                        modelName = activeModel
+                                    )
+                                }
                             )
-                        }
-                    )
 
-                    segmentSummaries.add(segmentOutput.segmentSummary)
+                            segmentSummaries.add(segmentOutput.segmentSummary)
+                            segmentModels.add(activeModel)
 
-                    // Menggabungkan karakter baru / pembaruan karakter
-                    segmentOutput.characterSheet.forEach { newChar ->
-                        val existingIdx = allCharacterSheet.indexOfFirst {
-                            it.name.equals(newChar.name, ignoreCase = true)
-                        }
-                        if (existingIdx >= 0) {
-                            if (newChar.description.isNotBlank()) {
-                                allCharacterSheet[existingIdx] = newChar
+                            // Menggabungkan karakter baru / pembaruan karakter
+                            segmentOutput.characterSheet.forEach { newChar ->
+                                val existingIdx = allCharacterSheet.indexOfFirst {
+                                    it.name.equals(newChar.name, ignoreCase = true)
+                                }
+                                if (existingIdx >= 0) {
+                                    if (newChar.description.isNotBlank()) {
+                                        allCharacterSheet[existingIdx] = newChar
+                                    }
+                                } else {
+                                    allCharacterSheet.add(newChar)
+                                }
                             }
-                        } else {
-                            allCharacterSheet.add(newChar)
-                        }
-                    }
 
-                    allTimeline.addAll(segmentOutput.timeline)
+                            allTimeline.addAll(segmentOutput.timeline)
 
-                    // Simpan hasil setiap segmen ke database Room SEGERA setelah segmen selesai!
-                    activeEntityId?.let { id ->
-                        val current = repository.getAnalysisById(id)
-                        if (current != null) {
-                            val updatedEntity = current.copy(
-                                completedSegmentsCount = i + 1,
-                                characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(allCharacterSheet),
-                                timelineJson = AnalysisJsonAdapter.timelineToJson(allTimeline),
-                                segmentSummariesJson = AnalysisJsonAdapter.summariesToJson(segmentSummaries),
-                                status = if (i + 1 == totalSegments) "PROCESSING_NARRATION" else "IN_PROGRESS",
-                                updatedAt = System.currentTimeMillis()
-                            )
-                            repository.update(updatedEntity)
-                            Log.i(TAG, "[$currentStage] Berhasil disimpan ke Room (Segmen ${i + 1} tersimpan)")
+                            // Simpan hasil setiap segmen ke database Room SEGERA setelah segmen selesai!
+                            activeEntityId?.let { id ->
+                                val current = repository.getAnalysisById(id)
+                                if (current != null) {
+                                    val updatedEntity = current.copy(
+                                        completedSegmentsCount = i + 1,
+                                        characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(allCharacterSheet),
+                                        timelineJson = AnalysisJsonAdapter.timelineToJson(allTimeline),
+                                        segmentSummariesJson = AnalysisJsonAdapter.summariesToJson(segmentSummaries),
+                                        segmentModelsJson = AnalysisJsonAdapter.summariesToJson(segmentModels),
+                                        status = if (i + 1 == totalSegments) "PROCESSING_NARRATION" else "IN_PROGRESS",
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                    repository.update(updatedEntity)
+                                    Log.i(TAG, "[$currentStage] Berhasil disimpan ke Room (Segmen ${i + 1} tersimpan dengan model $activeModel)")
+                                }
+                            }
+
+                            segmentSuccess = true
+                        } catch (e: GeminiApiException) {
+                            if (e.isDailyQuota) {
+                                modelUsageStorage.markQuotaExceeded(activeModel, e.retryDelaySeconds)
+                                refreshSelectedModelUsage()
+                            }
+                            if (isAutoSwitch && e.isDailyQuota) {
+                                Log.w(TAG, "[$currentStage] Kuota harian habis pada model '$activeModel'. Mencoba beralih ke model berikutnya...")
+                                lastQuotaException = e
+                                currentModelIndex++
+                                if (currentModelIndex >= modelList.size) {
+                                    Log.e(TAG, "[$currentStage] Semua model dalam daftar telah habis kuotanya.")
+                                    throw lastQuotaException ?: e
+                                }
+                                continue
+                            } else if (isAutoSwitch && lastQuotaException != null && (e.httpCode == 404 || e.userFriendlyMessage.contains("tidak dikenal", ignoreCase = true))) {
+                                Log.w(TAG, "[$currentStage] Model '$activeModel' tidak dikenal (HTTP 404). Melewati ke model berikutnya...")
+                                currentModelIndex++
+                                if (currentModelIndex >= modelList.size) {
+                                    Log.e(TAG, "[$currentStage] Semua model berikutnya tidak valid.")
+                                    throw lastQuotaException ?: e
+                                }
+                                continue
+                            } else {
+                                throw e
+                            }
                         }
                     }
                 }
 
                 // Tahap Akhir: Menyusun Narasi Lengkap Video
                 currentStage = "Penyusunan Narasi Rekap Video"
-                Log.i(TAG, "[$currentStage] Menyusun narasi video...")
+                Log.i(TAG, "[$currentStage] Menyusun narasi video dengan model '$activeModel'...")
                 _analysisState.value = AnalysisState.GeneratingNarration(
-                    "Menyusun narasi video lengkap berdasarkan ringkasan $totalSegments segmen..."
+                    "Menyusun narasi video lengkap berdasarkan ringkasan $totalSegments segmen...",
+                    modelName = activeModel
+                )
+                AnalysisForegroundService.updateStatus(
+                    context = context,
+                    title = "Penyusunan Narasi Rekap",
+                    message = "Menyusun narasi lengkap berdasarkan $totalSegments segmen...",
+                    model = activeModel
                 )
 
-                val narration = geminiClient.generateFinalNarration(
-                    segmentSummaries = segmentSummaries,
-                    characterSheet = allCharacterSheet,
-                    onStatusUpdate = { msg ->
-                        _analysisState.value = AnalysisState.GeneratingNarration(msg)
+                var narration = ""
+                var narrationSuccess = false
+
+                while (!narrationSuccess) {
+                    activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
+                    try {
+                        val currentLang = narrationLanguageStorage.getLanguage()
+                        narration = geminiClient.generateFinalNarration(
+                            segmentSummaries = segmentSummaries,
+                            characterSheet = allCharacterSheet,
+                            model = activeModel,
+                            language = currentLang,
+                            onStatusUpdate = { msg ->
+                                _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = activeModel)
+                            }
+                        )
+                        narrationSuccess = true
+                    } catch (e: GeminiApiException) {
+                        if (e.isDailyQuota) {
+                            modelUsageStorage.markQuotaExceeded(activeModel, e.retryDelaySeconds)
+                            refreshSelectedModelUsage()
+                        }
+                        if (isAutoSwitch && e.isDailyQuota) {
+                            currentModelIndex++
+                            if (currentModelIndex < modelList.size) {
+                                continue
+                            }
+                        } else if (isAutoSwitch && (e.httpCode == 404 || e.userFriendlyMessage.contains("tidak dikenal", ignoreCase = true))) {
+                            currentModelIndex++
+                            if (currentModelIndex < modelList.size) {
+                                continue
+                            }
+                        }
+                        throw e
                     }
-                )
+                }
 
                 // Simpan status COMPLETED ke database Room
                 activeEntityId?.let { id ->
@@ -653,15 +1044,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     totalSegments = totalSegments,
                     durationFormatted = formatSeconds(totalSeconds),
                     intervalSeconds = _promptIntervalSeconds.value,
-                    videoName = video.displayName
+                    videoName = video.displayName,
+                    segmentModels = segmentModels,
+                    segmentSummaries = segmentSummaries
                 )
 
                 Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
-                _analysisState.value = AnalysisState.Success(finalResult)
+                _analysisState.value = AnalysisState.Success(finalResult, styleName = activeStyle.name)
+                AnalysisForegroundService.stop(context)
+                AnalysisForegroundService.notifyCompleted(context, video.displayName)
 
             } catch (e: GeminiApiException) {
                 Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
-                handleErrorAndSaveToDb(activeEntityId, currentStage, e.userFriendlyMessage)
+                AnalysisForegroundService.stop(context)
+                if (e.isDailyQuota) {
+                    val waitTime = if (e.retryDelaySeconds != null && e.retryDelaySeconds > 0) {
+                        val hours = e.retryDelaySeconds / 3600
+                        val minutes = (e.retryDelaySeconds % 3600) / 60
+                        if (hours > 0) "$hours jam $minutes menit" else "$minutes menit"
+                    } else {
+                        modelUsageStorage.getFormattedResetTime(modelStorage.getSelectedModel())
+                    }
+                    AnalysisForegroundService.notifyQuotaExceeded(
+                        context = context,
+                        model = modelStorage.getSelectedModel(),
+                        waitTimeFormatted = waitTime
+                    )
+                } else {
+                    AnalysisForegroundService.notifyFailed(
+                        context = context,
+                        stage = e.stage,
+                        errorMessage = e.userFriendlyMessage
+                    )
+                }
+                if (e.isFileProcessingTimeout) {
+                    // JANGAN hapus sesi! Simpan analisis dengan status menunggu ("WAITING")
+                    activeEntityId?.let { id ->
+                        val ent = repository.getAnalysisById(id)
+                        if (ent != null) {
+                            repository.update(
+                                ent.copy(
+                                    status = "WAITING",
+                                    lastErrorStage = "Menunggu Pemrosesan Video",
+                                    lastErrorMessage = e.userFriendlyMessage,
+                                    geminiFileRemoteName = remoteFileName,
+                                    geminiFileUri = remoteFileUri,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    handleErrorAndSaveToDb(activeEntityId, currentStage, e.userFriendlyMessage)
+                }
                 val resumeInfo = checkCanResume(activeEntityId)
                 val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
                 val savedSummaries = if (savedEntity != null) {
@@ -673,7 +1108,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     httpCode = e.httpCode,
                     rawApiMessage = e.rawMessage,
                     errorMessage = e.userFriendlyMessage,
-                    canRetry = !e.isDailyQuota,
+                    canRetry = !e.isDailyQuota && !e.isFileProcessingTimeout && !e.isFileProcessingFailed,
                     canResume = if (e.isDailyQuota) true else resumeInfo.canResume,
                     resumeSegment = resumeInfo.resumeSegment,
                     canSkipAndFinish = resumeInfo.canSkipAndFinish,
@@ -682,12 +1117,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     retryDelaySeconds = e.retryDelaySeconds,
                     completedSegmentsCount = savedEntity?.completedSegmentsCount ?: 0,
                     totalSegments = savedEntity?.totalSegments ?: 0,
-                    completedSummaries = savedSummaries
+                    completedSummaries = savedSummaries,
+                    activeKeyName = apiKeyStorage.getActiveKeyName(),
+                    modelName = modelStorage.getSelectedModel(),
+                    isFileProcessingTimeout = e.isFileProcessingTimeout,
+                    isFileProcessingFailed = e.isFileProcessingFailed
                 )
             } catch (e: CancellationException) {
                 Log.i(TAG, "Analisis dibatalkan oleh pengguna.")
+                AnalysisForegroundService.stop(context)
                 _analysisState.value = AnalysisState.Idle
             } catch (e: Exception) {
+                AnalysisForegroundService.stop(context)
                 val isAccessLost = e is SecurityException ||
                         e is java.io.FileNotFoundException ||
                         e.cause is SecurityException ||
@@ -697,6 +1138,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (isAccessLost) {
                     Log.w(TAG, "Akses berkas video hilang (SecurityException / FileNotFoundException): ${e.message}")
+                    AnalysisForegroundService.notifyFailed(
+                        context = context,
+                        stage = "Akses Berkas Video",
+                        errorMessage = "Video tidak bisa dibuka lagi. Pilih video yang sama."
+                    )
                     val resumeInfo = checkCanResume(activeEntityId)
                     val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
                     _analysisState.value = AnalysisState.Error(
@@ -710,11 +1156,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         analysisId = activeEntityId,
                         isVideoAccessLost = true,
                         expectedDurationMs = savedEntity?.durationMs ?: 0L,
-                        expectedSizeBytes = savedEntity?.videoSizeBytes ?: 0L
+                        expectedSizeBytes = savedEntity?.videoSizeBytes ?: 0L,
+                        activeKeyName = apiKeyStorage.getActiveKeyName(),
+                        modelName = modelStorage.getSelectedModel()
                     )
                 } else {
                     Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
                     val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
+                    AnalysisForegroundService.notifyFailed(
+                        context = context,
+                        stage = currentStage,
+                        errorMessage = msg
+                    )
                     handleErrorAndSaveToDb(activeEntityId, currentStage, msg)
                     val resumeInfo = checkCanResume(activeEntityId)
                     val savedEntity = if (activeEntityId != null) repository.getAnalysisById(activeEntityId) else null
@@ -734,7 +1187,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         analysisId = activeEntityId,
                         completedSegmentsCount = savedEntity?.completedSegmentsCount ?: 0,
                         totalSegments = savedEntity?.totalSegments ?: 0,
-                        completedSummaries = savedSummaries
+                        completedSummaries = savedSummaries,
+                        activeKeyName = apiKeyStorage.getActiveKeyName(),
+                        modelName = modelStorage.getSelectedModel()
                     )
                 }
             }
@@ -871,20 +1326,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val summaries = AnalysisJsonAdapter.jsonToSummaries(entity.segmentSummariesJson)
                 val characterSheet = AnalysisJsonAdapter.jsonToCharacterSheet(entity.characterSheetJson)
                 val timeline = AnalysisJsonAdapter.jsonToTimeline(entity.timelineJson)
+                val segmentModels = AnalysisJsonAdapter.jsonToSummaries(entity.segmentModelsJson)
+                val selectedModelName = modelStorage.getSelectedModel()
 
                 val savedCount = summaries.size.coerceAtLeast(entity.completedSegmentsCount)
-                Log.i(TAG, "Menyelesaikan analisis ID $targetId tanpa segmen berikutnya. Segmen tersimpan: $savedCount")
+                Log.i(TAG, "Menyelesaikan analisis ID $targetId tanpa segmen berikutnya dengan model '$selectedModelName'. Segmen tersimpan: $savedCount")
 
                 _analysisState.value = AnalysisState.GeneratingNarration(
-                    "Menyusun narasi rekap akhir dari $savedCount segmen yang tersimpan (segmen terakhir dilewati)..."
+                    message = "Menyusun narasi rekap akhir dari $savedCount segmen yang tersimpan (segmen terakhir dilewati)...",
+                    modelName = selectedModelName
                 )
 
+                val currentLang = narrationLanguageStorage.getLanguage()
                 val rawNarration = try {
                     geminiClient.generateFinalNarration(
                         segmentSummaries = summaries,
                         characterSheet = characterSheet,
+                        model = selectedModelName,
+                        language = currentLang,
                         onStatusUpdate = { msg ->
-                            _analysisState.value = AnalysisState.GeneratingNarration(msg)
+                            _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = selectedModelName)
                         }
                     )
                 } catch (e: Exception) {
@@ -918,20 +1379,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     durationFormatted = entity.formattedDuration,
                     intervalSeconds = entity.intervalSeconds,
                     videoName = entity.videoName,
-                    note = "Segmen terakhir dilewati"
+                    note = "Segmen terakhir dilewati",
+                    segmentModels = segmentModels,
+                    segmentSummaries = summaries
                 )
-                _analysisState.value = AnalysisState.Success(finalResult)
+                val savedStyle = visualStyleStorage.getStyleForAnalysis(targetId) ?: visualStyleStorage.getSelectedStyle()
+                _analysisState.value = AnalysisState.Success(finalResult, styleName = savedStyle.name)
+                AnalysisForegroundService.stop(context)
+                AnalysisForegroundService.notifyCompleted(context, entity.videoName)
 
+            } catch (e: GeminiApiException) {
+                Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen: ${e.userFriendlyMessage}", e)
+                AnalysisForegroundService.stop(context)
+                AnalysisForegroundService.notifyFailed(context, e.stage, e.userFriendlyMessage)
+                _analysisState.value = AnalysisState.Error(
+                    stage = e.stage,
+                    httpCode = e.httpCode,
+                    rawApiMessage = e.rawMessage,
+                    errorMessage = e.userFriendlyMessage,
+                    activeKeyName = apiKeyStorage.getActiveKeyName(),
+                    modelName = modelStorage.getSelectedModel()
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.message}", e)
+                AnalysisForegroundService.stop(context)
+                AnalysisForegroundService.notifyFailed(context, "Selesaikan Tanpa Segmen", e.localizedMessage ?: "Gagal")
                 _analysisState.value = AnalysisState.Error(
                     stage = "Selesaikan Tanpa Segmen",
                     httpCode = null,
                     rawApiMessage = e.stackTraceToString(),
-                    errorMessage = "Gagal menyelesaikan analisis: ${e.localizedMessage}"
+                    errorMessage = "Gagal menyelesaikan analisis: ${e.localizedMessage}",
+                    activeKeyName = apiKeyStorage.getActiveKeyName(),
+                    modelName = modelStorage.getSelectedModel()
                 )
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        AnalysisForegroundService.stop(context)
     }
 
     private suspend fun handleErrorAndSaveToDb(entityId: Long?, stage: String, errorMsg: String) {

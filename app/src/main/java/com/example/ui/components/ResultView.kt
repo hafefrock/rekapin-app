@@ -105,6 +105,17 @@ object ExportFormatters {
                     appendLine()
                 }
             }
+            if (result.segmentSummaries.isNotEmpty()) {
+                appendLine("D. HASIL RINGKASAN PER SEGMEN")
+                appendLine("--------------------------------------------------")
+                result.segmentSummaries.forEachIndexed { index, summary ->
+                    val modelName = result.segmentModels.getOrNull(index).orEmpty()
+                    val header = if (modelName.isNotBlank()) "Segmen ${index + 1} (Model: $modelName)" else "Segmen ${index + 1}"
+                    appendLine("[$header]")
+                    appendLine(summary)
+                    appendLine()
+                }
+            }
             appendLine("==================================================")
             appendLine("Dihasilkan oleh Rekapin Anime AI")
         }.trimEnd()
@@ -137,12 +148,27 @@ object ExportFormatters {
     fun formatAllVisualPromptsOnly(timeline: List<TimelineItem>): String {
         return timeline.map { it.visualPrompt.trim() }.joinToString(separator = "\n\n")
     }
+
+    fun formatSegmentSummaries(summaries: List<String>, models: List<String>): String {
+        if (summaries.isEmpty()) return "Tidak ada ringkasan segmen."
+        return buildString {
+            appendLine("=== HASIL RINGKASAN PER SEGMEN ===")
+            summaries.forEachIndexed { index, summary ->
+                val modelName = models.getOrNull(index).orEmpty()
+                val header = if (modelName.isNotBlank()) "Segmen ${index + 1} [Model: $modelName]" else "Segmen ${index + 1}"
+                appendLine("[$header]")
+                appendLine(summary)
+                if (index < summaries.size - 1) appendLine()
+            }
+        }.trimEnd()
+    }
 }
 
 @Composable
 fun ResultView(
     result: AnimeAnalysisResult,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    styleName: String = "Anime 2D standar"
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -181,12 +207,17 @@ fun ResultView(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf(
-        "Semua Format",
-        "a. Narasi",
-        "b. Karakter (${result.characterSheet.size})",
-        "c. Timeline (${result.timeline.size})"
-    )
+    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size) {
+        buildList {
+            add("Semua Format")
+            add("a. Narasi")
+            add("b. Karakter (${result.characterSheet.size})")
+            add("c. Timeline (${result.timeline.size})")
+            if (result.segmentSummaries.isNotEmpty()) {
+                add("d. Segmen (${result.segmentSummaries.size})")
+            }
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxWidth()
@@ -325,6 +356,7 @@ fun ResultView(
         when (selectedTab) {
             0 -> AllResultsSection(
                 result = result,
+                styleName = styleName,
                 onCopyNarration = {
                     clipboard.setText(AnnotatedString(result.narration))
                     notify("Tersalin")
@@ -343,6 +375,10 @@ fun ResultView(
                 },
                 onCopyScenePrompt = { prompt ->
                     clipboard.setText(AnnotatedString(prompt))
+                    notify("Tersalin")
+                },
+                onCopySegmentSummaries = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)))
                     notify("Tersalin")
                 }
             )
@@ -363,6 +399,7 @@ fun ResultView(
             3 -> TimelineSection(
                 timeline = result.timeline,
                 intervalSeconds = result.intervalSeconds,
+                styleName = styleName,
                 onCopyTimeline = {
                     clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
                     notify("Tersalin")
@@ -376,6 +413,18 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
+            4 -> SegmentSummariesSection(
+                summaries = result.segmentSummaries,
+                models = result.segmentModels,
+                onCopyAll = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)))
+                    notify("Tersalin")
+                },
+                onCopySegment = { summary ->
+                    clipboard.setText(AnnotatedString(summary))
+                    notify("Tersalin")
+                }
+            )
         }
     }
 }
@@ -383,11 +432,13 @@ fun ResultView(
 @Composable
 private fun AllResultsSection(
     result: AnimeAnalysisResult,
+    styleName: String = "Anime 2D standar",
     onCopyNarration: () -> Unit,
     onCopyCharacters: () -> Unit,
     onCopyTimeline: () -> Unit,
     onCopyAllVisualPrompts: () -> Unit,
-    onCopyScenePrompt: (String) -> Unit
+    onCopyScenePrompt: (String) -> Unit,
+    onCopySegmentSummaries: () -> Unit
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -445,7 +496,7 @@ private fun AllResultsSection(
             Spacer(modifier = Modifier.height(8.dp))
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt",
-                subtitle = "Interval ${result.intervalSeconds} detik dengan format 2D Japanese anime prompt",
+                subtitle = "Interval ${result.intervalSeconds} detik dengan $styleName prompt",
                 onCopy = onCopyTimeline,
                 copyLabel = "Salin"
             )
@@ -460,8 +511,32 @@ private fun AllResultsSection(
             TimelineCard(
                 index = index + 1,
                 item = timelineItem,
-                onCopyPrompt = { onCopyScenePrompt(timelineItem.visualPrompt) }
+                onCopyPrompt = { onCopyScenePrompt(timelineItem.visualPrompt) },
+                styleName = styleName
             )
+        }
+
+        // Section d: Hasil per Segmen
+        if (result.segmentSummaries.isNotEmpty()) {
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                SectionHeader(
+                    stepLabel = "d. Ringkasan Cerita per Segmen",
+                    subtitle = "Hasil analisis cerita per segmen beserta model AI yang mengerjakan",
+                    onCopy = onCopySegmentSummaries,
+                    copyLabel = "Salin"
+                )
+            }
+
+            itemsIndexed(result.segmentSummaries) { index, summary ->
+                val modelName = result.segmentModels.getOrNull(index).orEmpty()
+                SegmentSummaryCard(
+                    index = index + 1,
+                    summary = summary,
+                    modelName = modelName,
+                    onCopy = { onCopyScenePrompt(summary) }
+                )
+            }
         }
     }
 }
@@ -534,6 +609,7 @@ private fun CharacterSheetSection(
 private fun TimelineSection(
     timeline: List<TimelineItem>,
     intervalSeconds: Int,
+    styleName: String = "Anime 2D standar",
     onCopyTimeline: () -> Unit,
     onCopyAllVisualPrompts: () -> Unit,
     onCopyScenePrompt: (String) -> Unit
@@ -545,7 +621,7 @@ private fun TimelineSection(
         item {
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt (${timeline.size} Adegan)",
-                subtitle = "Interval $intervalSeconds detik, prompt 2D anime cel-shaded HD",
+                subtitle = "Interval $intervalSeconds detik, prompt $styleName",
                 onCopy = onCopyTimeline,
                 copyLabel = "Salin"
             )
@@ -561,7 +637,8 @@ private fun TimelineSection(
             TimelineCard(
                 index = index + 1,
                 item = item,
-                onCopyPrompt = { onCopyScenePrompt(item.visualPrompt) }
+                onCopyPrompt = { onCopyScenePrompt(item.visualPrompt) },
+                styleName = styleName
             )
         }
     }
@@ -799,7 +876,8 @@ private fun CharacterCard(charInfo: CharacterInfo) {
 private fun TimelineCard(
     index: Int,
     item: TimelineItem,
-    onCopyPrompt: () -> Unit
+    onCopyPrompt: () -> Unit,
+    styleName: String = "Anime 2D standar"
 ) {
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -896,7 +974,7 @@ private fun TimelineCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Visual Prompt (2D Japanese Anime)",
+                            text = "Visual Prompt ($styleName)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -912,6 +990,154 @@ private fun TimelineCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SegmentSummariesSection(
+    summaries: List<String>,
+    models: List<String>,
+    onCopyAll: () -> Unit,
+    onCopySegment: (String) -> Unit
+) {
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        item {
+            SectionHeader(
+                stepLabel = "d. Ringkasan per Segmen",
+                subtitle = "Ringkasan cerita per segmen video beserta label model Gemini yang digunakan",
+                onCopy = onCopyAll,
+                copyLabel = "Salin Semua"
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+
+        if (summaries.isEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Belum ada ringkasan segmen yang tercatat.",
+                        modifier = Modifier.padding(14.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(summaries) { index, summary ->
+                val modelName = models.getOrNull(index).orEmpty()
+                SegmentSummaryCard(
+                    index = index + 1,
+                    summary = summary,
+                    modelName = modelName,
+                    onCopy = { onCopySegment(summary) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SegmentSummaryCard(
+    index: Int,
+    summary: String,
+    modelName: String,
+    onCopy: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .testTag("segment_card_$index")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Segmen $index",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (modelName.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .testTag("chip_model_segment_$index")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = modelName,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onCopy,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("btn_copy_segment_$index")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Salin Ringkasan Segmen $index",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = summary,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 18.sp
+            )
         }
     }
 }

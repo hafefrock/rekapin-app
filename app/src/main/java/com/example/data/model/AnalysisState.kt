@@ -24,15 +24,18 @@ sealed interface AnalysisState {
         val currentSegment: Int,
         val totalSegments: Int,
         val timeRange: String,
-        val message: String = "Menganalisis segmen..."
+        val message: String = "Menganalisis segmen...",
+        val modelName: String = ""
     ) : AnalysisState
 
     data class GeneratingNarration(
-        val message: String = "Menyusun narasi video lengkap berdasarkan ringkasan segmen..."
+        val message: String = "Menyusun narasi video lengkap berdasarkan ringkasan segmen...",
+        val modelName: String = ""
     ) : AnalysisState
 
     data class Success(
-        val result: AnimeAnalysisResult
+        val result: AnimeAnalysisResult,
+        val styleName: String = "Anime 2D standar"
     ) : AnalysisState
 
     data class Error(
@@ -52,7 +55,11 @@ sealed interface AnalysisState {
         val retryDelaySeconds: Long? = null,
         val completedSegmentsCount: Int = 0,
         val totalSegments: Int = 0,
-        val completedSummaries: List<String> = emptyList()
+        val completedSummaries: List<String> = emptyList(),
+        val activeKeyName: String = "",
+        val modelName: String = "",
+        val isFileProcessingTimeout: Boolean = false,
+        val isFileProcessingFailed: Boolean = false
     ) : AnalysisState {
         fun getFullReport(): String {
             if (isVideoAccessLost) {
@@ -68,7 +75,7 @@ sealed interface AnalysisState {
                 if (httpCode != null) {
                     appendLine("Kode HTTP: $httpCode")
                 }
-                appendLine("Model: ${GeminiConstants.GEMINI_MODEL}")
+                appendLine("Model: ${if (modelName.isNotBlank()) modelName else GeminiConstants.GEMINI_MODEL}")
                 appendLine("Penjelasan: $errorMessage")
                 if (rawApiMessage.isNotBlank()) {
                     appendLine("\nDetail Pesan Asli API / Server:")

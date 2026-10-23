@@ -1,11 +1,15 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,16 +34,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
@@ -49,6 +60,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,11 +92,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Palette
 import com.example.R
 import com.example.data.api.GeminiConstants
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.model.AnalysisState
+import com.example.data.model.ModelUsageInfo
 import com.example.data.model.SelectedVideo
+import com.example.data.model.VisualStyle
+import com.example.ui.components.KeySelectionDialog
+import com.example.ui.components.ManualQuotaDialog
 import com.example.ui.components.ResultView
 import com.example.ui.components.SettingsDialog
 import com.example.ui.viewmodel.MainViewModel
@@ -102,6 +120,20 @@ fun HomeScreen(
     val pendingMatchDialogState by viewModel.pendingMatchDialogState.collectAsState()
     val analysisState by viewModel.analysisState.collectAsState()
     val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
+    val apiKeys by viewModel.apiKeys.collectAsState()
+    val activeKeyName by viewModel.activeKeyName.collectAsState()
+
+    val models by viewModel.models.collectAsState()
+    val selectedModel by viewModel.selectedModel.collectAsState()
+    val isAutoSwitchModel by viewModel.isAutoSwitchModel.collectAsState()
+    val narrationLanguage by viewModel.narrationLanguage.collectAsState()
+    val selectedModelUsage by viewModel.selectedModelUsage.collectAsState()
+    val visualStyles by viewModel.visualStyles.collectAsState()
+    val selectedStyle by viewModel.selectedStyle.collectAsState()
+
+    var showKeySelectionDialog by remember { mutableStateOf(false) }
+    var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
+    var manualQuotaModelToEdit by remember { mutableStateOf<String?>(null) }
 
     val historyList by viewModel.historyList.collectAsState()
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
@@ -143,13 +175,43 @@ fun HomeScreen(
         }
     }
 
+    var pendingAnalysisAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Jika izin diberikan atau ditolak, analisis tetap berjalan sesuai permintaan
+        pendingAnalysisAction?.invoke()
+        pendingAnalysisAction = null
+    }
+
+    val requestNotificationAndStart: (() -> Unit) -> Unit = { action ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                pendingAnalysisAction = action
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                action()
+            }
+        } else {
+            action()
+        }
+    }
+
     // Tampilkan Detail Riwayat jika sedang dipilih
     viewingHistoryItem?.let { historyEntity ->
         HistoryDetailScreen(
             entity = historyEntity,
+            styleName = viewModel.getStyleNameForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
-                viewModel.startAnalysis(historyEntity.id)
+                requestNotificationAndStart {
+                    viewModel.startAnalysis(historyEntity.id)
+                }
                 viewModel.closeHistory()
             },
             onFinishWithoutCurrentSegment = {
@@ -169,7 +231,9 @@ fun HomeScreen(
             onSelectAnalysis = { viewModel.openHistoryDetail(it) },
             onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
             onResumeAnalysis = { resumeId ->
-                viewModel.startAnalysis(resumeId)
+                requestNotificationAndStart {
+                    viewModel.startAnalysis(resumeId)
+                }
                 viewModel.closeHistory()
             },
             onFinishWithoutCurrentSegment = { resumeId ->
@@ -219,7 +283,7 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Analisis Anime AI • ${GeminiConstants.GEMINI_MODEL}",
+                                text = "Analisis Anime AI • $selectedModel",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -336,6 +400,7 @@ fun HomeScreen(
                         // Hasil Lengkap (Narasi, Lembar Karakter, Timeline Visual Prompt)
                         ResultView(
                             result = state.result,
+                            styleName = state.styleName,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -344,17 +409,38 @@ fun HomeScreen(
                 is AnalysisState.Error -> {
                     ErrorContent(
                         errorState = state,
+                        activeKeyName = activeKeyName,
                         onRetry = {
-                            if (state.canResume && state.analysisId != null) {
-                                viewModel.startAnalysis(state.analysisId)
-                            } else {
-                                viewModel.startAnalysis()
+                            requestNotificationAndStart {
+                                if (state.canResume && state.analysisId != null) {
+                                    viewModel.startAnalysis(state.analysisId)
+                                } else {
+                                    viewModel.startAnalysis()
+                                }
                             }
                         },
-                        onResume = { resumeId -> viewModel.startAnalysis(resumeId) },
+                        onResume = { resumeId ->
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis(resumeId)
+                            }
+                        },
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
                         onPickSameVideo = { recoveryVideoPickerLauncher.launch(arrayOf("video/*")) },
                         onOpenSettings = { viewModel.openSettings() },
+                        onSwitchKey = { analysisId ->
+                            pendingResumeAnalysisId = analysisId
+                            showKeySelectionDialog = true
+                        },
+                        onCheckAgain = { analysisId ->
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis(resumeId = analysisId, forceReupload = false)
+                            }
+                        },
+                        onReupload = { analysisId ->
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis(resumeId = analysisId, forceReupload = true)
+                            }
+                        },
                         onCancel = { viewModel.resetAnalysis() }
                     )
                 }
@@ -366,6 +452,8 @@ fun HomeScreen(
                 is AnalysisState.GeneratingNarration -> {
                     ProgressContent(
                         state = state,
+                        activeKeyName = activeKeyName,
+                        activeModelName = selectedModel,
                         onCancel = { viewModel.cancelAnalysis() }
                     )
                 }
@@ -377,14 +465,30 @@ fun HomeScreen(
                         segmentDurationOption = segmentDurationOption,
                         segmentPlanSummary = segmentPlanSummary,
                         historyList = historyList,
+                        models = models,
+                        selectedModel = selectedModel,
+                        selectedModelUsage = selectedModelUsage,
+                        visualStyles = visualStyles,
+                        selectedStyle = selectedStyle,
+                        onSelectStyle = { viewModel.selectStyle(it) },
+                        onOpenManualQuota = { manualQuotaModelToEdit = it },
+                        onSelectModel = { viewModel.setSelectedModel(it) },
                         onSelectVideoClicked = {
                             videoPickerLauncher.launch(arrayOf("video/*"))
                         },
                         onClearVideo = { viewModel.clearSelectedVideo() },
                         onIntervalChanged = { viewModel.setIntervalSeconds(it) },
                         onSegmentDurationChanged = { viewModel.setSegmentDurationOption(it) },
-                        onStartAnalysis = { viewModel.startAnalysis() },
-                        onResumeAnalysis = { resumeId -> viewModel.startAnalysis(resumeId) },
+                        onStartAnalysis = {
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis()
+                            }
+                        },
+                        onResumeAnalysis = { resumeId ->
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis(resumeId)
+                            }
+                        },
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
                         onOpenSettings = { viewModel.openSettings() },
                         onOpenHistory = { viewModel.openHistory() },
@@ -423,7 +527,11 @@ fun HomeScreen(
                 },
                 confirmButton = {
                     Button(
-                        onClick = { viewModel.resumeMatchedAnalysis() },
+                        onClick = {
+                            requestNotificationAndStart {
+                                viewModel.resumeMatchedAnalysis()
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -436,7 +544,11 @@ fun HomeScreen(
                 },
                 dismissButton = {
                     OutlinedButton(
-                        onClick = { viewModel.startFreshAnalysisWithVideo() },
+                        onClick = {
+                            requestNotificationAndStart {
+                                viewModel.startFreshAnalysisWithVideo()
+                            }
+                        },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.testTag("btn_fresh_matched_dialog")
                     ) {
@@ -448,9 +560,63 @@ fun HomeScreen(
 
         if (isSettingsOpen) {
             SettingsDialog(
-                currentApiKey = viewModel.apiKeyStorage.getCustomApiKey(),
+                apiKeys = apiKeys,
+                activeKeyName = activeKeyName,
+                models = models,
+                selectedModel = selectedModel,
+                isAutoSwitchModel = isAutoSwitchModel,
+                selectedLanguage = narrationLanguage,
                 onDismiss = { viewModel.closeSettings() },
-                onSave = { newKey -> viewModel.saveApiKey(newKey) }
+                onAddKey = { name, key -> viewModel.addApiKey(name, key) },
+                onRenameKey = { id, newName -> viewModel.renameApiKey(id, newName) },
+                onDeleteKey = { id -> viewModel.deleteApiKey(id) },
+                onSetActiveKey = { id -> viewModel.setActiveApiKey(id) },
+                onAddModel = { model -> viewModel.addModel(model) },
+                onDeleteModel = { model -> viewModel.deleteModel(model) },
+                onMoveModel = { from, to -> viewModel.moveModel(from, to) },
+                onSelectModel = { model -> viewModel.setSelectedModel(model) },
+                onToggleAutoSwitch = { enabled -> viewModel.toggleAutoSwitchModel(enabled) },
+                onSelectLanguage = { lang -> viewModel.setNarrationLanguage(lang) },
+                visualStyles = visualStyles,
+                selectedStyle = selectedStyle,
+                onSelectStyle = { viewModel.selectStyle(it) },
+                onAddCustomStyle = { name, desc -> viewModel.addCustomStyle(name, desc) },
+                onUpdateCustomStyle = { id, name, desc -> viewModel.updateCustomStyle(id, name, desc) },
+                onDeleteCustomStyle = { id -> viewModel.deleteCustomStyle(id) },
+                modelUsageStorage = viewModel.modelUsageStorage,
+                onSetModelLimit = { model, limit -> viewModel.setModelLimit(model, limit) },
+                onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) }
+            )
+        }
+
+        if (showKeySelectionDialog) {
+            KeySelectionDialog(
+                apiKeys = apiKeys,
+                onDismiss = { showKeySelectionDialog = false },
+                onSelectKeyAndResume = { keyId ->
+                    showKeySelectionDialog = false
+                    viewModel.switchKeyAndResume(keyId, pendingResumeAnalysisId)
+                },
+                onAddKeyAndResume = { name, key ->
+                    showKeySelectionDialog = false
+                    viewModel.addKeyAndResume(name, key, pendingResumeAnalysisId)
+                }
+            )
+        }
+
+        // Dialog Atur Manual Kuota Model
+        manualQuotaModelToEdit?.let { modelName ->
+            val usageInfo = viewModel.modelUsageStorage.getUsageInfo(modelName)
+            ManualQuotaDialog(
+                modelName = modelName,
+                currentUsage = usageInfo.used,
+                currentLimit = usageInfo.limit,
+                onDismiss = { manualQuotaModelToEdit = null },
+                onConfirm = { newUsage, newLimit ->
+                    viewModel.setModelUsage(modelName, newUsage)
+                    viewModel.setModelLimit(modelName, newLimit)
+                    manualQuotaModelToEdit = null
+                }
             )
         }
     }
@@ -463,6 +629,14 @@ private fun IdleSetupContent(
     segmentDurationOption: SegmentDurationOption,
     segmentPlanSummary: SegmentPlanSummary?,
     historyList: List<AnimeAnalysisEntity>,
+    models: List<String>,
+    selectedModel: String,
+    selectedModelUsage: ModelUsageInfo,
+    visualStyles: List<VisualStyle>,
+    selectedStyle: VisualStyle,
+    onSelectStyle: (VisualStyle) -> Unit,
+    onOpenManualQuota: (String) -> Unit,
+    onSelectModel: (String) -> Unit,
     onSelectVideoClicked: () -> Unit,
     onClearVideo: () -> Unit,
     onIntervalChanged: (Int) -> Unit,
@@ -1044,6 +1218,160 @@ private fun IdleSetupContent(
             }
         }
 
+        // Pilihan Gaya Visual Prompt
+        Text(
+            text = "Gaya Visual",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        var isStyleDropdownExpanded by remember { mutableStateOf(false) }
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { isStyleDropdownExpanded = true }
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(12.dp)
+                            .testTag("dropdown_style_selector"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = selectedStyle.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                if (selectedStyle.isBuiltIn) MaterialTheme.colorScheme.primaryContainer
+                                                else MaterialTheme.colorScheme.secondaryContainer
+                                            )
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = if (selectedStyle.isBuiltIn) "Bawaan" else "Kustom",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (selectedStyle.isBuiltIn) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = selectedStyle.promptDescription,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Pilih Gaya Visual",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = isStyleDropdownExpanded,
+                        onDismissRequest = { isStyleDropdownExpanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .testTag("dropdown_style_menu")
+                    ) {
+                        visualStyles.forEachIndexed { index, style ->
+                            val isSelected = style.id == selectedStyle.id
+                            DropdownMenuItem(
+                                text = {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = style.name,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.sp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(
+                                                        if (style.isBuiltIn) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                        else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                                                    )
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (style.isBuiltIn) "Bawaan" else "Kustom",
+                                                    fontSize = 9.sp,
+                                                    color = if (style.isBuiltIn) MaterialTheme.colorScheme.onPrimaryContainer
+                                                    else MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                            }
+                                            if (isSelected) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Terpilih",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = style.promptDescription,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onSelectStyle(style)
+                                    isStyleDropdownExpanded = false
+                                },
+                                modifier = Modifier.testTag("menu_item_style_$index")
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section 4: Ringkasan Rencana Analisis (Tampil sebelum tombol "Analisis" aktif)
         Text(
             text = "4. Ringkasan Rencana Analisis",
@@ -1188,6 +1516,94 @@ private fun IdleSetupContent(
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 6. Kebutuhan vs Sisa Kuota
+                    val needed = segmentPlanSummary.totalRequestsCount
+                    val remaining = selectedModelUsage.remaining
+                    val isInsufficient = remaining < needed
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Status Kuota Model",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Perlu $needed permintaan, sisa $remaining",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (isInsufficient) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 7. Gaya Visual Terpilih
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Gaya Visual Prompt",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = selectedStyle.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    if (isInsufficient) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("warning_quota_insufficient")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Peringatan Kuota",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Peringatan: Sisa kuota model ${selectedModelUsage.modelName} ($remaining) kurang dari yang diperlukan ($needed permintaan). Pertimbangkan beralih model atau menunggu reset kuota.",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Text(
                         text = "Silakan pilih video anime terlebih dahulu untuk melihat ringkasan durasi, pembagian segmen, dan perkiraan jumlah permintaan AI.",
@@ -1195,6 +1611,33 @@ private fun IdleSetupContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Gaya Visual Aktif",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = selectedStyle.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1222,6 +1665,178 @@ private fun IdleSetupContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 16.sp
                 )
+            }
+        }
+
+        // Section 6: Pilihan Model Gemini (Dropdown sebelum tombol Analisis)
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Model Gemini",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Model ini dipakai untuk seluruh proses analisis video dan narasi.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Card Status Penggunaan Hari Ini & Jam Reset
+                Card(
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedModelUsage.isQuotaExceeded) {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("card_quota_today_status")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Hari ini: ${selectedModelUsage.modelName} ${selectedModelUsage.used}/${selectedModelUsage.limit}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (selectedModelUsage.isQuotaExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Perkiraan reset: ${selectedModelUsage.resetTimeFormatted} (waktu HP)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { onOpenManualQuota(selectedModel) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_manual_adjust_quota")
+                        ) {
+                            Text(
+                                text = "Atur manual",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                var isModelDropdownExpanded by remember { mutableStateOf(false) }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { isModelDropdownExpanded = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("dropdown_model_button"),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = selectedModel.ifBlank { "Pilih Model" },
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Pilih Model",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = isModelDropdownExpanded,
+                        onDismissRequest = { isModelDropdownExpanded = false },
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surface)
+                            .testTag("dropdown_model_menu")
+                    ) {
+                        models.forEachIndexed { index, modelName ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = modelName,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (modelName == selectedModel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (modelName == selectedModel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (modelName == selectedModel) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Terpilih",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    onSelectModel(modelName)
+                                    isModelDropdownExpanded = false
+                                },
+                                modifier = Modifier.testTag("menu_item_model_$index")
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -1261,6 +1876,8 @@ private fun IdleSetupContent(
 @Composable
 private fun ProgressContent(
     state: AnalysisState,
+    activeKeyName: String,
+    activeModelName: String,
     onCancel: () -> Unit
 ) {
     Box(
@@ -1287,6 +1904,71 @@ private fun ProgressContent(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Badge Key & Model Aktif
+                val currentModelName = when (state) {
+                    is AnalysisState.AnalyzingSegment -> state.modelName.ifBlank { activeModelName }
+                    is AnalysisState.GeneratingNarration -> state.modelName.ifBlank { activeModelName }
+                    else -> activeModelName
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (activeKeyName.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .testTag("badge_active_key_progress")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Key: $activeKeyName",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    if (currentModelName.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .testTag("badge_active_model_progress")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Model: $currentModelName",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
                 // Progress Indicator
                 when (state) {
                     is AnalysisState.Uploading -> {
@@ -1430,16 +2112,44 @@ private fun ProgressContent(
 @Composable
 private fun ErrorContent(
     errorState: AnalysisState.Error,
+    activeKeyName: String,
     onRetry: () -> Unit,
     onResume: (Long?) -> Unit,
     onFinishWithoutCurrentSegment: (Long?) -> Unit,
     onPickSameVideo: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSwitchKey: (Long?) -> Unit,
+    onCheckAgain: (Long?) -> Unit = {},
+    onReupload: (Long?) -> Unit = {},
     onCancel: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
     var isCopied by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+
+    val isTimeout = errorState.isFileProcessingTimeout
+    val isFailed = errorState.isFileProcessingFailed
+    val isAccessLost = errorState.isVideoAccessLost
+
+    val headerIcon = when {
+        isTimeout -> Icons.Default.Refresh
+        isAccessLost -> Icons.Default.VideoFile
+        else -> Icons.Default.ErrorOutline
+    }
+    val iconTint = when {
+        isTimeout -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.error
+    }
+    val iconBg = when {
+        isTimeout -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        else -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+    }
+    val titleText = when {
+        isTimeout -> "Video Masih Diproses di Server Google"
+        isFailed -> "Pemrosesan Video Gagal"
+        isAccessLost -> "Akses Video Terputus"
+        else -> "Gagal Menganalisis Video"
+    }
 
     Box(
         modifier = Modifier
@@ -1454,7 +2164,7 @@ private fun ErrorContent(
                 .fillMaxWidth()
                 .border(
                     width = 1.dp,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                    color = iconTint.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(20.dp)
                 )
                 .testTag("error_card")
@@ -1470,19 +2180,19 @@ private fun ErrorContent(
                     modifier = Modifier
                         .size(52.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f)),
+                        .background(iconBg),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (errorState.isVideoAccessLost) Icons.Default.VideoFile else Icons.Default.ErrorOutline,
+                        imageVector = headerIcon,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
+                        tint = iconTint,
                         modifier = Modifier.size(30.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = if (errorState.isVideoAccessLost) "Akses Video Terputus" else "Gagal Menganalisis Video",
+                    text = titleText,
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1498,15 +2208,15 @@ private fun ErrorContent(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
-                            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .background(iconBg)
+                            .border(1.dp, iconTint.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Text(
-                            text = "Tahap: ${errorState.stage}",
+                            text = if (isTimeout) "Status: PROCESSING (15 Menit)" else "Tahap: ${errorState.stage}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.error,
+                            color = iconTint,
                             maxLines = 2
                         )
                     }
@@ -1526,6 +2236,69 @@ private fun ErrorContent(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                    }
+                }
+
+                // Badge Nama Key & Model Aktif di Layar Error
+                val displayKeyName = errorState.activeKeyName.ifBlank { activeKeyName }
+                val displayModelName = errorState.modelName
+                if (displayKeyName.isNotBlank() || displayModelName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (displayKeyName.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    .testTag("badge_active_key_error")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Key,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Key: $displayKeyName",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        if (displayModelName.isNotBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    .testTag("badge_active_model_error")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Model: $displayModelName",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
@@ -1787,8 +2560,34 @@ private fun ErrorContent(
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
-                    // Baris Tombol Aksi: "API Key" dan "Coba Lagi" (hanya jika bukan kuota harian)
+                    // Tombol Aksi Kuota Harian vs Timeout 15 Menit vs Failed vs Error Biasa
                     if (errorState.isDailyQuota) {
+                        Button(
+                            onClick = { onSwitchKey(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_switch_key_error")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Ganti Key",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         OutlinedButton(
                             onClick = onOpenSettings,
                             shape = RoundedCornerShape(12.dp),
@@ -1801,6 +2600,56 @@ private fun ErrorContent(
                                 text = "Kelola API Key",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else if (errorState.isFileProcessingTimeout) {
+                        Button(
+                            onClick = { onCheckAgain(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_check_again")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Cek lagi",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else if (errorState.isFileProcessingFailed) {
+                        Button(
+                            onClick = { onReupload(errorState.analysisId) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("btn_reupload_failed")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Unggah Ulang Video",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     } else {
