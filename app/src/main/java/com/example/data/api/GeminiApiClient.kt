@@ -475,6 +475,18 @@ class GeminiApiClient(
             "- ${it.name}: ${it.description}"
         }
 
+        val youtubeSafeRules = """
+        YOUTUBE & ADVERTISER-FRIENDLY SAFETY GUIDELINES:
+        - Write for a general audience, with a family-friendly and advertiser-friendly tone.
+        - Never use profanity, slurs, or vulgar words. If a character swears, convey the emotion without the words.
+        - Describe violence in a non-graphic way: focus on stakes, emotion, and outcome. No gore, no detailed injuries, no torture, no step-by-step methods.
+        - No sexual content. Keep romance PG. Never sexualize any character, especially youthful-looking ones; skip fan-service details.
+        - Do not promote or glorify hate, harassment, drugs, or dangerous acts. Mention heavy topics (death, self-harm) briefly and sensitively, never with methods.
+        - Use your own original wording. Do not quote dialogue, lyrics, or official synopsis text verbatim.
+        - Stay faithful to the events. No clickbait, no exaggerated or misleading claims, and do not present the recap as official.
+        - Treat everything as fiction. Do not mention real people or real-world groups.
+        """.trimIndent()
+
         val prompt = if (language == NarrationLanguage.INDONESIAN) {
             """
             You are a master anime storyteller and narrator.
@@ -488,10 +500,17 @@ class GeminiApiClient(
             
             INSTRUCTIONS:
             Write an engaging, fluid, and captivating story recap of the entire episode in natural, highly expressive Bahasa Indonesia (gaya pencerita anime yang hidup, emosional, dramatis, dan mengalir natural, bukan terjemahan harfiah/kaku).
+            - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan, kata kasar, atau hinaan.
             - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
-            - Write in natural narrative prose paragraphs (3 to 5 flowing paragraphs) in Indonesian.
             - Keep official character names and terms intact.
-            - Do NOT use bullet points, robotic scene tags, or dry summaries. Make it read like an exciting, immersive recap for anime fans.
+            
+            $youtubeSafeRules
+            
+            VOICE-OVER OUTPUT FORMAT:
+            - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
+            - Exactly 3 to 5 flowing paragraphs.
+            - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
+            - Absolutely NO conversational intro or greeting (e.g. do NOT include "Berikut adalah rekap...", "Here is the recap...", or similar phrases). Start directly with the narration.
             """.trimIndent()
         } else {
             """
@@ -507,8 +526,15 @@ class GeminiApiClient(
             INSTRUCTIONS:
             Write an engaging, fluid, and captivating story recap of the entire episode in natural American English (native USA storytelling voice).
             - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
-            - Write in natural narrative prose paragraphs (3 to 5 flowing paragraphs).
-            - Do NOT use bullet points, robotic scene tags, or dry summaries. Make it read like an exciting, immersive recap for anime fans.
+            - Keep official character names and terms intact.
+            
+            $youtubeSafeRules
+            
+            VOICE-OVER OUTPUT FORMAT:
+            - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
+            - Exactly 3 to 5 flowing paragraphs.
+            - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
+            - Absolutely NO conversational intro or greeting (e.g. do NOT include "Here is the recap...", "Here is the story...", or similar opening remarks). Start directly with the narration.
             """.trimIndent()
         }
 
