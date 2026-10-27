@@ -63,7 +63,12 @@ import com.example.data.model.CharacterInfo
 import com.example.data.model.TimelineItem
 
 object ExportFormatters {
-    fun formatFullExport(result: AnimeAnalysisResult): String {
+    fun formatFullExport(result: AnimeAnalysisResult, narrationModeName: String = ""): String {
+        val modeLabel = narrationModeName.ifBlank {
+            result.narrationMode.ifBlank {
+                if (result.narration.isBlank()) "Tanpa Narasi" else "Rekap Cerita"
+            }
+        }
         return buildString {
             appendLine("==================================================")
             appendLine("       HASIL REKAPIN & PROMPT GENERATOR ANIME     ")
@@ -74,13 +79,16 @@ object ExportFormatters {
             appendLine("Durasi Video       : ${result.durationFormatted}")
             appendLine("Total Segmen       : ${result.totalSegments}")
             appendLine("Interval Prompt    : ${result.intervalSeconds} detik")
+            appendLine("Mode Narasi        : $modeLabel")
             appendLine("Total Karakter     : ${result.characterSheet.size}")
             appendLine("Total Prompt Adegan: ${result.timeline.size}")
             appendLine("==================================================")
-            appendLine()
-            appendLine("A. NARASI ALUR CERITA (RECAP NARRATIVE)")
-            appendLine("--------------------------------------------------")
-            appendLine(result.narration.ifBlank { "Tidak ada narasi yang dihasilkan." })
+            if (result.narration.isNotBlank()) {
+                appendLine()
+                appendLine("A. NARASI ALUR CERITA (RECAP NARRATIVE)")
+                appendLine("--------------------------------------------------")
+                appendLine(result.narration)
+            }
             appendLine()
             appendLine("B. LEMBAR KARAKTER (CHARACTER SHEET)")
             appendLine("--------------------------------------------------")
@@ -168,10 +176,17 @@ object ExportFormatters {
 fun ResultView(
     result: AnimeAnalysisResult,
     modifier: Modifier = Modifier,
-    styleName: String = "Anime 2D standar"
+    styleName: String = "Anime 2D standar",
+    narrationModeName: String = ""
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+
+    val effectiveModeName = narrationModeName.ifBlank {
+        result.narrationMode.ifBlank {
+            if (result.narration.isBlank()) "Tanpa Narasi" else "Rekap Cerita"
+        }
+    }
 
     val notify: (String) -> Unit = remember(context) {
         { message ->
@@ -194,7 +209,7 @@ fun ResultView(
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val exportText = ExportFormatters.formatFullExport(result)
+                val exportText = ExportFormatters.formatFullExport(result, effectiveModeName)
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(exportText.toByteArray(Charsets.UTF_8))
                     outputStream.flush()
@@ -207,10 +222,13 @@ fun ResultView(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size) {
+    val hasNarration = result.narration.isNotBlank()
+    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration) {
         buildList {
             add("Semua Format")
-            add("a. Narasi")
+            if (hasNarration) {
+                add("a. Narasi")
+            }
             add("b. Karakter (${result.characterSheet.size})")
             add("c. Timeline (${result.timeline.size})")
             if (result.segmentSummaries.isNotEmpty()) {
@@ -222,6 +240,58 @@ fun ResultView(
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
+        // Info Header: Interval Prompt & Mode Narasi
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                if (result.videoName.isNotBlank()) {
+                    Text(
+                        text = result.videoName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Interval Prompt: ${result.intervalSeconds} detik",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Mode Narasi: $effectiveModeName",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "${result.totalSegments} Segmen • ${result.durationFormatted}",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
         // Quick Action Bar: "Salin Semua" & "Ekspor .txt"
         Row(
             modifier = Modifier
@@ -231,7 +301,7 @@ fun ResultView(
         ) {
             Button(
                 onClick = {
-                    val fullText = ExportFormatters.formatFullExport(result)
+                    val fullText = ExportFormatters.formatFullExport(result, effectiveModeName)
                     clipboard.setText(AnnotatedString(fullText))
                     notify("Tersalin")
                 },
@@ -353,8 +423,11 @@ fun ResultView(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        when (selectedTab) {
-            0 -> AllResultsSection(
+        val safeSelectedTab = if (selectedTab in tabs.indices) selectedTab else 0
+        val currentTabTitle = tabs.getOrElse(safeSelectedTab) { "Semua Format" }
+
+        when {
+            currentTabTitle == "Semua Format" -> AllResultsSection(
                 result = result,
                 styleName = styleName,
                 onCopyNarration = {
@@ -382,21 +455,21 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
-            1 -> NarrationSection(
+            currentTabTitle == "a. Narasi" -> NarrationSection(
                 narration = result.narration,
                 onCopyNarration = {
                     clipboard.setText(AnnotatedString(result.narration))
                     notify("Tersalin")
                 }
             )
-            2 -> CharacterSheetSection(
+            currentTabTitle.startsWith("b. Karakter") -> CharacterSheetSection(
                 characters = result.characterSheet,
                 onCopyCharacters = {
                     clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
                     notify("Tersalin")
                 }
             )
-            3 -> TimelineSection(
+            currentTabTitle.startsWith("c. Timeline") -> TimelineSection(
                 timeline = result.timeline,
                 intervalSeconds = result.intervalSeconds,
                 styleName = styleName,
@@ -413,7 +486,7 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
-            4 -> SegmentSummariesSection(
+            currentTabTitle.startsWith("d. Segmen") -> SegmentSummariesSection(
                 summaries = result.segmentSummaries,
                 models = result.segmentModels,
                 onCopyAll = {
@@ -422,6 +495,34 @@ fun ResultView(
                 },
                 onCopySegment = { summary ->
                     clipboard.setText(AnnotatedString(summary))
+                    notify("Tersalin")
+                }
+            )
+            else -> AllResultsSection(
+                result = result,
+                styleName = styleName,
+                onCopyNarration = {
+                    clipboard.setText(AnnotatedString(result.narration))
+                    notify("Tersalin")
+                },
+                onCopyCharacters = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
+                    notify("Tersalin")
+                },
+                onCopyTimeline = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
+                    notify("Tersalin")
+                },
+                onCopyAllVisualPrompts = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(result.timeline)))
+                    notify("Tersalin")
+                },
+                onCopyScenePrompt = { prompt ->
+                    clipboard.setText(AnnotatedString(prompt))
+                    notify("Tersalin")
+                },
+                onCopySegmentSummaries = {
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)))
                     notify("Tersalin")
                 }
             )
@@ -445,18 +546,20 @@ private fun AllResultsSection(
         modifier = Modifier.fillMaxWidth()
     ) {
         // Section a: Narasi
-        item {
-            SectionHeader(
-                stepLabel = "a. Narasi Alur Cerita",
-                subtitle = "Rekap cerita mengalir bergaya narator anime (Natural American English)",
-                onCopy = onCopyNarration,
-                copyLabel = "Salin"
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            NarrationCard(
-                narration = result.narration,
-                onCopy = onCopyNarration
-            )
+        if (result.narration.isNotBlank()) {
+            item {
+                SectionHeader(
+                    stepLabel = "a. Narasi Alur Cerita",
+                    subtitle = "Rekap cerita mengalir bergaya narator anime",
+                    onCopy = onCopyNarration,
+                    copyLabel = "Salin"
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                NarrationCard(
+                    narration = result.narration,
+                    onCopy = onCopyNarration
+                )
+            }
         }
 
         // Section b: Lembar Karakter

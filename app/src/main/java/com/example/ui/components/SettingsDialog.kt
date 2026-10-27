@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ApiKeyItem
 import com.example.data.model.NarrationLanguage
+import com.example.data.model.NarrationMode
 import com.example.data.model.VisualStyle
 
 @Composable
@@ -91,6 +92,7 @@ fun SettingsDialog(
     selectedModel: String,
     isAutoSwitchModel: Boolean,
     selectedLanguage: NarrationLanguage,
+    selectedNarrationMode: NarrationMode = NarrationMode.DEFAULT,
     onDismiss: () -> Unit,
     onAddKey: (name: String, key: String) -> Unit,
     onRenameKey: (id: String, newName: String) -> Unit,
@@ -102,6 +104,7 @@ fun SettingsDialog(
     onSelectModel: (String) -> Unit,
     onToggleAutoSwitch: (Boolean) -> Unit,
     onSelectLanguage: (NarrationLanguage) -> Unit,
+    onSelectNarrationMode: ((NarrationMode) -> Unit)? = null,
     visualStyles: List<VisualStyle> = emptyList(),
     selectedStyle: VisualStyle? = null,
     onSelectStyle: ((VisualStyle) -> Unit)? = null,
@@ -842,6 +845,83 @@ fun SettingsDialog(
                                 )
                             }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Text(
+                        text = "Mode narasi",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    NarrationMode.entries.forEach { mode ->
+                        val isSelected = (selectedNarrationMode == mode)
+                        val isDefault = (mode == NarrationMode.DEFAULT)
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                                }
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectNarrationMode?.invoke(mode) }
+                                .testTag("card_mode_${mode.code}")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = { onSelectNarrationMode?.invoke(mode) },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier.testTag("radio_mode_${mode.code}")
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = mode.displayName,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (isDefault) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "(default)",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = mode.description,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
 

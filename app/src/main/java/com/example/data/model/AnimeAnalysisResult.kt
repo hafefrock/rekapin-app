@@ -21,7 +21,8 @@ data class AnimeAnalysisResult(
     val videoName: String = "",
     val note: String = "",
     val segmentModels: List<String> = emptyList(),
-    val segmentSummaries: List<String> = emptyList()
+    val segmentSummaries: List<String> = emptyList(),
+    val narrationMode: String = ""
 )
 
 data class SegmentAnalysisOutput(

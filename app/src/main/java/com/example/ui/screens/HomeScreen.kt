@@ -140,11 +140,14 @@ fun HomeScreen(
     val selectedModel by viewModel.selectedModel.collectAsState()
     val isAutoSwitchModel by viewModel.isAutoSwitchModel.collectAsState()
     val narrationLanguage by viewModel.narrationLanguage.collectAsState()
+    val narrationMode by viewModel.narrationMode.collectAsState()
     val selectedModelUsage by viewModel.selectedModelUsage.collectAsState()
     val visualStyles by viewModel.visualStyles.collectAsState()
     val selectedStyle by viewModel.selectedStyle.collectAsState()
     val analysisRangeStartSec by viewModel.analysisRangeStartSec.collectAsState()
     val analysisRangeEndSec by viewModel.analysisRangeEndSec.collectAsState()
+    val selectedSeriesSourceId by viewModel.selectedSeriesSourceId.collectAsState()
+    val selectedSeriesSourceName by viewModel.selectedSeriesSourceName.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -416,6 +419,7 @@ fun HomeScreen(
                         ResultView(
                             result = state.result,
                             styleName = state.styleName,
+                            narrationModeName = state.result.narrationMode.ifBlank { narrationMode.displayName },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -508,6 +512,9 @@ fun HomeScreen(
                             }
                         },
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
+                        selectedSeriesSourceId = selectedSeriesSourceId,
+                        selectedSeriesSourceName = selectedSeriesSourceName,
+                        onSelectSeriesSource = { viewModel.selectSeriesSource(it) },
                         onOpenSettings = { viewModel.openSettings() },
                         onOpenHistory = { viewModel.openHistory() },
                         hasApiKey = viewModel.apiKeyStorage.hasApiKey()
@@ -584,6 +591,7 @@ fun HomeScreen(
                 selectedModel = selectedModel,
                 isAutoSwitchModel = isAutoSwitchModel,
                 selectedLanguage = narrationLanguage,
+                selectedNarrationMode = narrationMode,
                 onDismiss = { viewModel.closeSettings() },
                 onAddKey = { name, key -> viewModel.addApiKey(name, key) },
                 onRenameKey = { id, newName -> viewModel.renameApiKey(id, newName) },
@@ -595,6 +603,7 @@ fun HomeScreen(
                 onSelectModel = { model -> viewModel.setSelectedModel(model) },
                 onToggleAutoSwitch = { enabled -> viewModel.toggleAutoSwitchModel(enabled) },
                 onSelectLanguage = { lang -> viewModel.setNarrationLanguage(lang) },
+                onSelectNarrationMode = { mode -> viewModel.setNarrationMode(mode) },
                 visualStyles = visualStyles,
                 selectedStyle = selectedStyle,
                 onSelectStyle = { viewModel.selectStyle(it) },
@@ -666,6 +675,9 @@ private fun IdleSetupContent(
     onStartAnalysis: () -> Unit,
     onResumeAnalysis: (Long) -> Unit,
     onFinishWithoutCurrentSegment: (Long) -> Unit,
+    selectedSeriesSourceId: Long?,
+    selectedSeriesSourceName: String,
+    onSelectSeriesSource: (Long?) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
     hasApiKey: Boolean
