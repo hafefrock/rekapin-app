@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -714,8 +716,16 @@ fun SettingsDialog(
                     }
                 } else if (selectedTab == 2) {
                     // TAB 2: Bahasa Narasi
-                    Text(
-                        text = "Pilih bahasa untuk hasil narasi rekap akhir. Ringkasan segmen, character sheet, deskripsi adegan, dan visual prompt tetap dalam Bahasa Inggris (USA).",
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(end = 2.dp)
+                            .testTag("scroll_container_language_settings")
+                    ) {
+                        Text(
+                            text = "Pilih bahasa untuk hasil narasi rekap akhir. Ringkasan segmen, character sheet, deskripsi adegan, dan visual prompt tetap dalam Bahasa Inggris (USA).",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 15.sp
@@ -923,7 +933,9 @@ fun SettingsDialog(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
+            }
 
                 if (selectedTab == 3) {
                     // TAB 3: Gaya Visual
