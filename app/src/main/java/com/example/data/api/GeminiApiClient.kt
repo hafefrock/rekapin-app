@@ -208,10 +208,6 @@ class GeminiApiClient(
 
     /**
      * Menunggu pemrosesan berkas video di server Gemini hingga berstatus ACTIVE.
-     * Dijalankan sepenuhnya di Dispatchers.IO.
-     */
-    /**
-     * Menunggu pemrosesan berkas video di server Gemini hingga berstatus ACTIVE.
      * Polling setiap 5 detik hingga maksimal 15 menit.
      * Dijalankan sepenuhnya di Dispatchers.IO.
      */

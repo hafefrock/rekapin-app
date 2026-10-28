@@ -427,34 +427,6 @@ fun ResultView(
         val currentTabTitle = tabs.getOrElse(safeSelectedTab) { "Semua Format" }
 
         when {
-            currentTabTitle == "Semua Format" -> AllResultsSection(
-                result = result,
-                styleName = styleName,
-                onCopyNarration = {
-                    clipboard.setText(AnnotatedString(result.narration))
-                    notify("Tersalin")
-                },
-                onCopyCharacters = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
-                    notify("Tersalin")
-                },
-                onCopyTimeline = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
-                    notify("Tersalin")
-                },
-                onCopyAllVisualPrompts = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(result.timeline)))
-                    notify("Tersalin")
-                },
-                onCopyScenePrompt = { prompt ->
-                    clipboard.setText(AnnotatedString(prompt))
-                    notify("Tersalin")
-                },
-                onCopySegmentSummaries = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)))
-                    notify("Tersalin")
-                }
-            )
             currentTabTitle == "a. Narasi" -> NarrationSection(
                 narration = result.narration,
                 onCopyNarration = {
