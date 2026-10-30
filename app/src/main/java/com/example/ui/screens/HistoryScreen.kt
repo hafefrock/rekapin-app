@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -58,6 +59,13 @@ import androidx.compose.ui.unit.sp
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.ui.components.ResultView
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material3.Surface
+import com.example.ui.components.MergeExportDialog
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
@@ -66,9 +74,22 @@ fun HistoryScreen(
     onSelectAnalysis: (AnimeAnalysisEntity) -> Unit,
     onDeleteAnalysis: (Long) -> Unit,
     onResumeAnalysis: (Long) -> Unit,
-    onFinishWithoutCurrentSegment: ((Long) -> Unit)? = null
+    onFinishWithoutCurrentSegment: ((Long) -> Unit)? = null,
+    onMergeNarrationsWithAi: (suspend (parts: List<Pair<String, String>>, onStatus: (String) -> Unit) -> String)? = null
 ) {
-    BackHandler { onBack() }
+    // Mode pilih banyak
+    var isSelectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var showMergeDialog by remember { mutableStateOf(false) }
+
+    BackHandler {
+        if (isSelectMode) {
+            isSelectMode = false
+            selectedIds = emptySet()
+        } else {
+            onBack()
+        }
+    }
     var itemToDelete by remember { mutableStateOf<AnimeAnalysisEntity?>(null) }
 
     Scaffold(
@@ -77,14 +98,14 @@ fun HistoryScreen(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.History,
+                            imageVector = if (isSelectMode) Icons.Default.Layers else Icons.Default.History,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Riwayat Analisis",
+                            text = if (isSelectMode) "${selectedIds.size} Dipilih" else "Riwayat Analisis",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -93,7 +114,14 @@ fun HistoryScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            if (isSelectMode) {
+                                isSelectMode = false
+                                selectedIds = emptySet()
+                            } else {
+                                onBack()
+                            }
+                        },
                         modifier = Modifier.testTag("btn_back_history")
                     ) {
                         Icon(
@@ -107,6 +135,62 @@ fun HistoryScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        bottomBar = {
+            if (isSelectMode) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${selectedIds.size} dipilih",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    isSelectMode = false
+                                    selectedIds = emptySet()
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.height(38.dp)
+                            ) {
+                                Text("Batal", fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = { showMergeDialog = true },
+                                enabled = selectedIds.size >= 2,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .height(38.dp)
+                                    .testTag("btn_merge_export"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Layers,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Gabung & Ekspor", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
@@ -165,15 +249,49 @@ fun HistoryScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(analyses, key = { it.id }) { entity ->
+                        val isSelected = selectedIds.contains(entity.id)
                         HistoryItemCard(
                             entity = entity,
-                            onClick = { onSelectAnalysis(entity) },
+                            isSelectMode = isSelectMode,
+                            isSelected = isSelected,
+                            onLongClick = {
+                                if (entity.isCompleted) {
+                                    isSelectMode = true
+                                    selectedIds = selectedIds + entity.id
+                                }
+                            },
+                            onClick = {
+                                if (isSelectMode) {
+                                    if (entity.isCompleted) {
+                                        selectedIds = if (isSelected) {
+                                            selectedIds - entity.id
+                                        } else {
+                                            selectedIds + entity.id
+                                        }
+                                    }
+                                } else {
+                                    onSelectAnalysis(entity)
+                                }
+                            },
                             onDelete = { itemToDelete = entity },
                             onResume = { onResumeAnalysis(entity.id) }
                         )
                     }
                 }
             }
+        }
+
+        // Dialog Gabung & Ekspor
+        if (showMergeDialog) {
+            val selectedEntities = analyses.filter { selectedIds.contains(it.id) }
+            MergeExportDialog(
+                selectedAnalyses = selectedEntities,
+                onDismiss = { showMergeDialog = false },
+                onMergeNarrationsWithAi = { parts, onStatus ->
+                    onMergeNarrationsWithAi?.invoke(parts, onStatus)
+                        ?: throw IllegalStateException("Penyatuan narasi AI tidak tersedia")
+                }
+            )
         }
 
         // Delete Confirmation Dialog
@@ -224,28 +342,47 @@ fun HistoryScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HistoryItemCard(
     entity: AnimeAnalysisEntity,
+    isSelectMode: Boolean,
+    isSelected: Boolean,
+    onLongClick: () -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onResume: () -> Unit
 ) {
+    val isEnabled = !isSelectMode || entity.isCompleted
+    val alpha = if (isSelectMode && !entity.isCompleted) 0.38f else 1f
+
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+            else MaterialTheme.colorScheme.surface
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .alpha(alpha)
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
+                enabled = isEnabled,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .border(
-                width = 1.dp,
-                color = if (entity.isCompleted) MaterialTheme.colorScheme.outline
+                width = if (isSelected) 2.dp else 1.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary
+                else if (entity.isCompleted) MaterialTheme.colorScheme.outline
                 else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(16.dp)
             )
-            .testTag("history_card_${entity.id}")
+            .testTag(if (isSelectMode) "history_select_${entity.id}" else "history_card_${entity.id}")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -255,15 +392,19 @@ private fun HistoryItemCard(
                         .size(42.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
-                            if (entity.isCompleted) MaterialTheme.colorScheme.surfaceContainerHighest
+                            if (isSelected) MaterialTheme.colorScheme.primary
+                            else if (entity.isCompleted) MaterialTheme.colorScheme.surfaceContainerHighest
                             else MaterialTheme.colorScheme.primaryContainer
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (entity.isCompleted) Icons.Default.CheckCircle else Icons.Default.Movie,
-                        contentDescription = null,
-                        tint = if (entity.isCompleted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary,
+                        imageVector = if (isSelected) Icons.Default.Check
+                        else if (entity.isCompleted) Icons.Default.CheckCircle
+                        else Icons.Default.Movie,
+                        contentDescription = if (isSelected) "Dipilih" else null,
+                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }

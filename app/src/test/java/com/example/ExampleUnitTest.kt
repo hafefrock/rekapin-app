@@ -950,4 +950,114 @@ class ExampleUnitTest {
         org.junit.Assert.assertFalse(res.isSuccess)
         assertEquals("API Key kosong.", res.message)
     }
+
+    @Test
+    fun testShiftTimestamp() {
+        // Single timestamp
+        assertEquals("03:00", com.example.ui.components.ExportFormatters.shiftTimestamp("00:00", 180L))
+        assertEquals("03:15", com.example.ui.components.ExportFormatters.shiftTimestamp("00:15", 180L))
+        assertEquals("01:05:00", com.example.ui.components.ExportFormatters.shiftTimestamp("05:00", 3600L))
+
+        // Range timestamp
+        assertEquals(
+            "03:00 - 03:05",
+            com.example.ui.components.ExportFormatters.shiftTimestamp("00:00 - 00:05", 180L)
+        )
+        assertEquals(
+            "06:10 - 06:20",
+            com.example.ui.components.ExportFormatters.shiftTimestamp("03:10 - 03:20", 180L)
+        )
+    }
+
+    @Test
+    fun testFormatMergedExport_characterDeduplicationAndTimestampShift() {
+        val char1 = listOf(
+            CharacterInfo("Luffy", "Wears a red vest and straw hat"),
+            CharacterInfo("Zoro", "Green hair, carries 3 swords")
+        )
+        val char2 = listOf(
+            // Luffy repeated in lowercase with newer description
+            CharacterInfo("luffy", "Wears an open red shirt with chest scar"),
+            CharacterInfo("Nami", "Orange hair, navigator")
+        )
+
+        val timeline1 = listOf(
+            TimelineItem("00:00 - 00:05", "Opening ship shot", "Visual prompt 1")
+        )
+        val timeline2 = listOf(
+            TimelineItem("00:00 - 00:10", "Island appears", "Visual prompt 2")
+        )
+
+        val entity1 = AnimeAnalysisEntity(
+            id = 101L,
+            videoUriString = "uri1",
+            videoName = "Episode 1",
+            videoSizeBytes = 10_000_000L,
+            durationMs = 120_000L, // 2 minutes = 120s
+            mimeType = "video/mp4",
+            intervalSeconds = 5,
+            totalSegments = 1,
+            completedSegmentsCount = 1,
+            geminiFileRemoteName = "file1",
+            geminiFileUri = "uri1",
+            status = "COMPLETED",
+            characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(char1),
+            timelineJson = AnalysisJsonAdapter.timelineToJson(timeline1),
+            segmentSummariesJson = "[\"Summary Ep 1\"]",
+            narration = "Narration 1 for Ep 1"
+        )
+
+        val entity2 = AnimeAnalysisEntity(
+            id = 102L,
+            videoUriString = "uri2",
+            videoName = "Episode 2",
+            videoSizeBytes = 10_000_000L,
+            durationMs = 180_000L, // 3 minutes = 180s
+            mimeType = "video/mp4",
+            intervalSeconds = 5,
+            totalSegments = 1,
+            completedSegmentsCount = 1,
+            geminiFileRemoteName = "file2",
+            geminiFileUri = "uri2",
+            status = "COMPLETED",
+            characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(char2),
+            timelineJson = AnalysisJsonAdapter.timelineToJson(timeline2),
+            segmentSummariesJson = "[\"Summary Ep 2\"]",
+            narration = "Narration 2 for Ep 2"
+        )
+
+        val mergedText = com.example.ui.components.ExportFormatters.formatMergedExport(
+            items = listOf(entity1, entity2),
+            includeNarration = true,
+            includeCharacters = true,
+            includeTimeline = true,
+            includeVisualPromptsOnly = false,
+            includeSegmentSummaries = true
+        )
+
+        // 1. Overview
+        assertTrue(mergedText.contains("Jumlah Video Gabungan: 2"))
+        assertTrue(mergedText.contains("1. Episode 1 (02:00)"))
+        assertTrue(mergedText.contains("2. Episode 2 (03:00)"))
+        assertTrue(mergedText.contains("Total Durasi Gabungan : 05:00"))
+
+        // 2. Narasi
+        assertTrue(mergedText.contains("--- Bagian 1: Episode 1 ---"))
+        assertTrue(mergedText.contains("Narration 1 for Ep 1"))
+        assertTrue(mergedText.contains("--- Bagian 2: Episode 2 ---"))
+        assertTrue(mergedText.contains("Narration 2 for Ep 2"))
+
+        // 3. Characters: Luffy deduplicated, latest description used
+        assertTrue(mergedText.contains("Wears an open red shirt with chest scar"))
+        // Old description replaced
+        org.junit.Assert.assertFalse(mergedText.contains("Wears a red vest and straw hat"))
+        assertTrue(mergedText.contains("Zoro"))
+        assertTrue(mergedText.contains("Nami"))
+
+        // 4. Timeline continuous: Episode 2 timeline starts shifted by 120s (02:00)
+        // timeline1 was 00:00 - 00:05
+        assertTrue(mergedText.contains("[00:00 - 00:05] Adegan #1: Opening ship shot"))
+        // timeline2 was 00:00 - 00:10, shifted by 120s -> 02:00 - 02:10
+        assertTrue(mergedText.contains("[02:00 - 02:10] Adegan #2: Island appears"))
+    }
 }

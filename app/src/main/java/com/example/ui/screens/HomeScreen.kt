@@ -258,6 +258,9 @@ fun HomeScreen(
             onFinishWithoutCurrentSegment = { resumeId ->
                 viewModel.finishWithoutCurrentSegment(resumeId)
                 viewModel.closeHistory()
+            },
+            onMergeNarrationsWithAi = { parts, onStatus ->
+                viewModel.mergeNarrationsWithAi(parts, onStatus)
             }
         )
         return
@@ -1826,6 +1829,185 @@ private fun IdleSetupContent(
             }
         }
 
+        // Pilihan Seri (Opsional)
+        Text(
+            text = "Seri (Opsional)",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        var isSeriesDropdownExpanded by remember { mutableStateOf(false) }
+        val completedSeriesList = remember(historyList) {
+            historyList.filter { it.isCompleted }
+        }
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { isSeriesDropdownExpanded = true }
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(12.dp)
+                            .testTag("dropdown_series_selector"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (selectedSeriesSourceId != null) selectedSeriesSourceName
+                                    else "Tanpa seri (video mandiri)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (selectedSeriesSourceId != null) "Character sheet dilanjutkan dari video ini"
+                                    else "Character sheet dimulai dari nol",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Pilih Seri",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = isSeriesDropdownExpanded,
+                        onDismissRequest = { isSeriesDropdownExpanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .testTag("dropdown_series_menu")
+                    ) {
+                        // Pilihan a: Tanpa seri
+                        val isNoneSelected = (selectedSeriesSourceId == null)
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Tanpa seri (video mandiri)",
+                                            fontWeight = if (isNoneSelected) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 13.sp,
+                                            color = if (isNoneSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Character sheet dimulai dari nol",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (isNoneSelected) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Terpilih",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                onSelectSeriesSource(null)
+                                isSeriesDropdownExpanded = false
+                            },
+                            modifier = Modifier.testTag("menu_item_series_none")
+                        )
+
+                        // Pilihan b: Daftar analisis selesai
+                        if (completedSeriesList.isNotEmpty()) {
+                            completedSeriesList.forEach { entity ->
+                                val isSelected = (selectedSeriesSourceId == entity.id)
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = entity.videoName,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = 13.sp,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "${entity.totalSegments} Segmen • ${entity.formattedDate}",
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (isSelected) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Terpilih",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onSelectSeriesSource(entity.id)
+                                        isSeriesDropdownExpanded = false
+                                    },
+                                    modifier = Modifier.testTag("menu_item_series_${entity.id}")
+                                )
+                            }
+                        } else {
+                            // Pilihan c: Jika belum ada analisis selesai
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Belum ada analisis selesai di riwayat",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                enabled = false,
+                                onClick = {}
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section 4: Ringkasan Rencana Analisis (Tampil sebelum tombol "Analisis" aktif)
         Text(
             text = "4. Ringkasan Rencana Analisis",
@@ -2044,6 +2226,41 @@ private fun IdleSetupContent(
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                    }
+
+                    if (selectedSeriesSourceId != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Lanjutan Seri",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Melanjutkan seri dari: $selectedSeriesSourceName",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
 

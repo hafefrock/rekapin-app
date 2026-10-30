@@ -596,6 +596,137 @@ class GeminiApiClient(
     }
 
     /**
+     * Menggabungkan narasi dari beberapa video/analisis menjadi satu narasi yang mengalir mulus dengan AI.
+     * Permintaan teks saja, tanpa unggah video. Dijalankan sepenuhnya di Dispatchers.IO.
+     */
+    suspend fun mergeNarrationsWithAi(
+        parts: List<Pair<String, String>>, // Pair(videoTitle, narrationText)
+        model: String = GeminiConstants.GEMINI_MODEL,
+        language: NarrationLanguage = NarrationLanguage.INDONESIAN,
+        mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
+        onStatusUpdate: (String) -> Unit
+    ): String = withContext(Dispatchers.IO) {
+        val stageName = "Satukan Narasi dengan AI"
+        val apiKey = getValidApiKey(stageName)
+
+        Log.i(TAG, "[$stageName] Menggabungkan ${parts.size} bagian narasi dengan model '$model' di thread: ${Thread.currentThread().name}")
+
+        val partsText = parts.mapIndexed { idx, (title, text) ->
+            "--- BAGIAN ${idx + 1}: $title ---\n$text"
+        }.joinToString("\n\n")
+
+        val youtubeSafeRules = """
+        YOUTUBE & ADVERTISER-FRIENDLY SAFETY GUIDELINES:
+        - Write for a general audience, with a family-friendly and advertiser-friendly tone.
+        - Never use profanity, slurs, or vulgar words. If a character swears, convey the emotion without the words.
+        - Describe violence in a non-graphic way: focus on stakes, emotion, and outcome. No gore, no detailed injuries, no torture, no step-by-step methods.
+        - No sexual content. Keep romance PG. Never sexualize any character, especially youthful-looking ones; skip fan-service details.
+        - Do not promote or glorify hate, harassment, drugs, or dangerous acts. Mention heavy topics (death, self-harm) briefly and sensitively, never with methods.
+        - Use your own original wording. Do not quote dialogue, lyrics, or official synopsis text verbatim.
+        - Stay faithful to the events. No clickbait, no exaggerated or misleading claims, and do not present the recap as official.
+        - Treat everything as fiction. Do not mention real people or real-world groups.
+        """.trimIndent()
+
+        val instructionBlock = if (language == NarrationLanguage.INDONESIAN) {
+            """
+            INSTRUCTIONS:
+            Gabungkan narasi dari setiap bagian di atas menjadi satu kesatuan narasi yang utuh, dinamis, dan mengalir mulus.
+            - Tambahkan transisi cerita yang luwes dan alami saat berpindah antar bagian, menghubungkan alur secara logis dan emosional.
+            - JANGAN MENAMBAH KEJADIAN BARU, fakta fiktif baru, atau spekulasi yang tidak ada pada bagian-bagian tersebut.
+            - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan atau kata kasar.
+            - Pertahankan nama karakter dan istilah penting tetap konsisten.
+            """.trimIndent()
+        } else {
+            """
+            INSTRUCTIONS:
+            Seamlessly combine the story narrations from each section above into a single, cohesive, unified narrative arc.
+            - Add natural and fluid narrative transitions between sections so the story flows organically.
+            - DO NOT INVENT NEW EVENTS, scenes, or facts not present in the provided sections.
+            - Write in natural American English storytelling voice.
+            - Keep character names and established terms consistent.
+            """.trimIndent()
+        }
+
+        val formatBlock = """
+        OUTPUT FORMAT:
+        - Output ready for voice-over / reading: clean prose paragraphs.
+        - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings (do not include 'Bagian 1', etc.), NO emojis, NO parentheses, NO sound effects, and NO timestamps.
+        - Absolutely NO conversational greeting or intro (do NOT write 'Berikut adalah...', 'Here is the combined story...', etc.). Start immediately with the narration text.
+        """.trimIndent()
+
+        val prompt = """
+        You are a master anime storyteller and narrator.
+        Combine and harmonize the following story sections from consecutive episodes into one seamless continuous narrative:
+
+        $partsText
+
+        $instructionBlock
+
+        $youtubeSafeRules
+
+        $formatBlock
+        """.trimIndent()
+
+        val requestPayload = JSONObject().apply {
+            val contentsArray = JSONArray().apply {
+                val contentObj = JSONObject().apply {
+                    val partsArray = JSONArray().apply {
+                        put(JSONObject().apply { put("text", prompt) })
+                    }
+                    put("parts", partsArray)
+                }
+                put(contentObj)
+            }
+            put("contents", contentsArray)
+
+            val genConfig = JSONObject().apply {
+                put("temperature", 0.7)
+            }
+            put("generationConfig", genConfig)
+        }.toString()
+
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val rawResponse = executeWithRetry(
+            stage = stageName,
+            url = endpoint,
+            jsonBody = requestPayload,
+            modelForCounting = model.trim(),
+            onStatusUpdate = onStatusUpdate
+        )
+
+        try {
+            val json = JSONObject(rawResponse)
+            val candidates = json.optJSONArray("candidates")
+            if (candidates != null && candidates.length() > 0) {
+                val firstCandidate = candidates.getJSONObject(0)
+                val content = firstCandidate.optJSONObject("content")
+                val partsArr = content?.optJSONArray("parts")
+                if (partsArr != null && partsArr.length() > 0) {
+                    val mergedText = partsArr.getJSONObject(0).optString("text", "").trim()
+                    Log.i(TAG, "[$stageName] Narasi gabungan AI berhasil (${mergedText.length} karakter)")
+                    return@withContext mergedText
+                }
+            }
+            throw GeminiApiException(
+                stage = stageName,
+                httpCode = 200,
+                rawMessage = rawResponse,
+                userFriendlyMessage = "Respons dari AI tidak memuat kandidat teks narasi."
+            )
+        } catch (e: GeminiApiException) {
+            throw e
+        } catch (e: Exception) {
+            throw GeminiApiException(
+                stage = stageName,
+                httpCode = 200,
+                rawMessage = "Gagal memproses JSON respons: ${e.message}\nRespons Mentah:\n$rawResponse",
+                userFriendlyMessage = "Gagal membaca teks narasi gabungan yang dihasilkan AI.",
+                cause = e
+            )
+        }
+    }
+
+    /**
      * Eksekusi request dengan jeda dan auto-retry backoff saat rate limit (429/503).
      * Dijalankan sepenuhnya di Dispatchers.IO.
      */

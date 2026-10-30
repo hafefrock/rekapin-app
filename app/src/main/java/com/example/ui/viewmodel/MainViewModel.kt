@@ -473,6 +473,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Memanggil GeminiApiClient untuk menyatukan narasi dari beberapa analisis yang dipilih.
+     * Menggunakan multi-key dan model aktif dengan penanganan kuota otomatis.
+     */
+    suspend fun mergeNarrationsWithAi(
+        parts: List<Pair<String, String>>,
+        onStatusUpdate: (String) -> Unit
+    ): String {
+        val modelList = _models.value
+        val isAutoSwitch = _isAutoSwitchModel.value
+        val selectedModelName = _selectedModel.value
+        var currentModelIndex = modelList.indexOf(selectedModelName).let { if (it >= 0) it else 0 }
+        var activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
+        val lang = narrationLanguageStorage.getLanguage()
+        val mode = narrationModeStorage.getMode()
+
+        var lastException: Exception? = null
+
+        while (true) {
+            activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
+            try {
+                return geminiClient.mergeNarrationsWithAi(
+                    parts = parts,
+                    model = activeModel,
+                    language = lang,
+                    mode = mode,
+                    onStatusUpdate = onStatusUpdate
+                )
+            } catch (e: GeminiApiException) {
+                lastException = e
+                if (e.isDailyQuota) {
+                    modelUsageStorage.markQuotaExceeded(activeModel, e.retryDelaySeconds)
+                    refreshSelectedModelUsage()
+                }
+                if (isAutoSwitch && e.isDailyQuota) {
+                    currentModelIndex++
+                    if (currentModelIndex < modelList.size) {
+                        onStatusUpdate("Beralih ke model berikutnya (${modelList[currentModelIndex]})...")
+                        continue
+                    }
+                }
+                throw e
+            } catch (e: Exception) {
+                lastException = e
+                throw e
+            }
+        }
+    }
+
+    /**
      * Memproses video yang dipilih: membaca metadata dengan MediaMetadataRetriever tanpa memanggil Gemini.
      * Jika cocok dengan analisis yang belum selesai (durasi & ukuran sama), tampilkan dialog pilihan:
      * "Lanjutkan analisis lama" atau "Mulai baru".

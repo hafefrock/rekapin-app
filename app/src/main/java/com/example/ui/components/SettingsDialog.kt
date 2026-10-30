@@ -933,6 +933,28 @@ fun SettingsDialog(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
+
+                    if (selectedNarrationMode != NarrationMode.REKAP_VOICEOVER) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("warning_copyright_transcript")
+                        ) {
+                            Text(
+                                text = "Perhatian hak cipta: mode ini menyalin dialog atau narasi asli dari video. Isinya bisa dilindungi hak cipta, jadi jangan diunggah mentah-mentah ke YouTube. Pakai sebagai bahan referensi, lalu tulis ulang dengan kata-katamu sendiri.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                lineHeight = 15.sp,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
