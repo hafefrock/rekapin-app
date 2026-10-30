@@ -842,7 +842,9 @@ class ExampleUnitTest {
             Int::class.javaPrimitiveType,
             List::class.java,
             Boolean::class.javaPrimitiveType,
-            String::class.java
+            String::class.java,
+            com.example.data.model.NarrationMode::class.java,
+            com.example.data.model.NarrationLanguage::class.java
         )
         method.isAccessible = true
 
@@ -856,7 +858,9 @@ class ExampleUnitTest {
             5,
             emptyList<com.example.data.model.CharacterInfo>(),
             true,
-            customPromptDesc
+            customPromptDesc,
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA
         ) as String
 
         // Memastikan prompt mengandung deskripsi gaya terpilih
@@ -870,6 +874,56 @@ class ExampleUnitTest {
         org.junit.Assert.assertFalse(
             "Prompt tidak boleh mengandung kalimat lama 'Never 3D, never photorealistic'",
             prompt.contains("Never 3D, never photorealistic")
+        )
+    }
+
+    @Test
+    fun testSegmentPromptTranscriptLanguage() {
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "dummy-key" })
+
+        val method = com.example.data.api.GeminiApiClient::class.java.getDeclaredMethod(
+            "buildSegmentPrompt",
+            String::class.java,
+            String::class.java,
+            Long::class.javaPrimitiveType,
+            Long::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            List::class.java,
+            Boolean::class.javaPrimitiveType,
+            String::class.java,
+            com.example.data.model.NarrationMode::class.java,
+            com.example.data.model.NarrationLanguage::class.java
+        )
+        method.isAccessible = true
+
+        // 1. DIALOG_KONTEN dengan Bahasa Indonesia
+        val promptDialogId = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.DIALOG_KONTEN,
+            com.example.data.model.NarrationLanguage.INDONESIAN
+        ) as String
+
+        assertTrue(
+            "Prompt Dialog Konten Indonesia harus memuat instruksi Bahasa Indonesia",
+            promptDialogId.contains("Write the transcript in natural Bahasa Indonesia; translate it if the audio is in another language.")
+        )
+        assertTrue(
+            "Bagian LANGUAGE harus memuat instruksi pengecualian dialogue & originalNarration",
+            promptDialogId.contains("ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English, EXCEPT the dialogue and originalNarration fields, which follow the language stated in their own instructions.")
+        )
+
+        // 2. NARASI_ASLI dengan Bahasa Inggris USA
+        val promptNarasiAsliEn = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.NARASI_ASLI,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA
+        ) as String
+
+        assertTrue(
+            "Prompt Narasi Asli English USA harus memuat instruksi American English",
+            promptNarasiAsliEn.contains("Write the transcript in natural American English; translate it if the audio is in another language.")
         )
     }
 

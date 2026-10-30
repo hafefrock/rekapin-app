@@ -447,6 +447,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.i(TAG, "Mode narasi diatur ke: ${mode.displayName}")
     }
 
+    fun getModeForAnalysis(analysisId: Long): NarrationMode {
+        return narrationModeStorage.getModeForAnalysis(analysisId) ?: _narrationMode.value
+    }
+
+    fun getModeNameForAnalysis(analysisId: Long): String {
+        return getModeForAnalysis(analysisId).displayName
+    }
+
+    private fun formatTimelineTranscript(timeline: List<TimelineItem>, mode: NarrationMode): String {
+        val lines = timeline.mapNotNull { item ->
+            val text = when (mode) {
+                NarrationMode.DIALOG_KONTEN -> item.dialogue.trim()
+                NarrationMode.NARASI_ASLI -> item.originalNarration.trim()
+                else -> ""
+            }
+            if (text.isBlank()) null
+            else {
+                val rawTime = item.timestamp.substringBefore('-').trim().removePrefix("[").removeSuffix("]").trim()
+                val timeTag = if (rawTime.isNotBlank()) "[$rawTime]" else "[00:00]"
+                "$timeTag $text"
+            }
+        }
+        return lines.joinToString("\n")
+    }
+
     /**
      * Memproses video yang dipilih: membaca metadata dengan MediaMetadataRetriever tanpa memanggil Gemini.
      * Jika cocok dengan analisis yang belum selesai (durasi & ukuran sama), tampilkan dialog pilihan:
@@ -755,6 +780,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     visualStyleStorage.getSelectedStyle()
                 }
 
+                val activeMode: NarrationMode = if (existingEntity != null) {
+                    narrationModeStorage.getModeForAnalysis(existingEntity.id)
+                        ?: _narrationMode.value.also {
+                            narrationModeStorage.saveModeForAnalysis(existingEntity.id, it)
+                        }
+                } else {
+                    _narrationMode.value
+                }
+
                 // Jika Melanjutkan dari database
                 if (existingEntity != null) {
                     activeEntityId = existingEntity.id
@@ -769,7 +803,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
                         segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
                         segmentModels.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentModelsJson))
-                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan. Gaya: ${activeStyle.name}")
+                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan. Gaya: ${activeStyle.name}, Mode: ${activeMode.displayName}")
                     }
                 } else {
                     // Buat rekaman awal baru di Room database dengan rencana segmen tersimpan
@@ -797,7 +831,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeEntityId = repository.insert(newEntity)
                     activeAnalysisId = activeEntityId
                     visualStyleStorage.saveStyleForAnalysis(activeEntityId, activeStyle)
-                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId dengan rencana $totalSegments segmen, gaya: ${activeStyle.name}")
+                    narrationModeStorage.saveModeForAnalysis(activeEntityId, activeMode)
+                    Log.i(TAG, "Membuat entri analisis baru di Room database ID: $activeEntityId dengan rencana $totalSegments segmen, gaya: ${activeStyle.name}, mode: ${activeMode.displayName}")
 
                     // Simpan id analisis sumber di SharedPreferences (kunci = id analisis baru)
                     val chosenSeriesSourceId = _selectedSeriesSourceId.value
@@ -1003,6 +1038,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
 
                         try {
+                            val activeLanguage = narrationLanguageStorage.getLanguage()
                             val segmentOutput = geminiClient.analyzeSegment(
                                 currentSegment = i + 1,
                                 totalSegments = totalSegments,
@@ -1015,6 +1051,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 isFirstSegment = (i == 0),
                                 model = activeModel,
                                 stylePrompt = activeStyle.promptDescription,
+                                mode = activeMode,
+                                language = activeLanguage,
                                 onStatusUpdate = { statusMsg ->
                                     _analysisState.value = AnalysisState.AnalyzingSegment(
                                         currentSegment = i + 1,
@@ -1095,19 +1133,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Tahap Akhir: Menyusun Narasi Lengkap Video
                 currentStage = "Penyusunan Narasi Rekap Video"
-                val currentMode = narrationModeStorage.getMode()
                 val currentLang = narrationLanguageStorage.getLanguage()
-                val videoDurationSeconds = (video.durationMs / 1000L).coerceAtLeast(0L)
 
                 var narration = ""
                 var narrationSuccess = false
 
-                if (currentMode == NarrationMode.TANPA_NARASI) {
-                    Log.i(TAG, "[$currentStage] Mode Tanpa Narasi dipilih. Melewati tahap penyusunan narasi.")
-                    narration = ""
+                if (activeMode != NarrationMode.REKAP_VOICEOVER) {
+                    Log.i(TAG, "[$currentStage] Mode ${activeMode.displayName} dipilih. Menyusun transkrip lokal dari timeline.")
+                    narration = formatTimelineTranscript(allTimeline, activeMode)
                     narrationSuccess = true
                 } else {
-                    Log.i(TAG, "[$currentStage] Menyusun narasi video dengan model '$activeModel' (mode: ${currentMode.displayName})...")
+                    Log.i(TAG, "[$currentStage] Menyusun narasi video dengan model '$activeModel' (mode: ${activeMode.displayName})...")
                     _analysisState.value = AnalysisState.GeneratingNarration(
                         "Menyusun narasi video lengkap berdasarkan ringkasan $totalSegments segmen...",
                         modelName = activeModel
@@ -1127,8 +1163,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 characterSheet = allCharacterSheet,
                                 model = activeModel,
                                 language = currentLang,
-                                mode = currentMode,
-                                videoDurationSeconds = videoDurationSeconds,
                                 onStatusUpdate = { msg ->
                                     _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = activeModel)
                                 }
@@ -1182,7 +1216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     videoName = video.displayName,
                     segmentModels = segmentModels,
                     segmentSummaries = segmentSummaries,
-                    narrationMode = currentMode.displayName
+                    narrationMode = activeMode.displayName
                 )
 
                 Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
@@ -1468,13 +1502,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val savedCount = summaries.size.coerceAtLeast(entity.completedSegmentsCount)
                 Log.i(TAG, "Menyelesaikan analisis ID $targetId tanpa segmen berikutnya dengan model '$selectedModelName'. Segmen tersimpan: $savedCount")
 
-                val currentMode = narrationModeStorage.getMode()
+                val analysisMode = narrationModeStorage.getModeForAnalysis(targetId) ?: narrationModeStorage.getMode()
                 val currentLang = narrationLanguageStorage.getLanguage()
-                val videoDurationSeconds = (entity.durationMs / 1000L).coerceAtLeast(0L)
 
-                val finalNarration = if (currentMode == NarrationMode.TANPA_NARASI) {
-                    Log.i(TAG, "finishWithoutCurrentSegment: Mode Tanpa Narasi dipilih. Melewati tahap penyusunan narasi.")
-                    ""
+                val finalNarration = if (analysisMode != NarrationMode.REKAP_VOICEOVER) {
+                    Log.i(TAG, "finishWithoutCurrentSegment: Mode ${analysisMode.displayName} dipilih. Menyusun transkrip lokal dari timeline.")
+                    val note = "[Catatan: Segmen terakhir dilewati]\n\n"
+                    val transcript = formatTimelineTranscript(timeline, analysisMode)
+                    if (transcript.isNotBlank()) note + transcript else ""
                 } else {
                     _analysisState.value = AnalysisState.GeneratingNarration(
                         message = "Menyusun narasi rekap akhir dari $savedCount segmen yang tersimpan (segmen terakhir dilewati)...",
@@ -1487,8 +1522,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             characterSheet = characterSheet,
                             model = selectedModelName,
                             language = currentLang,
-                            mode = currentMode,
-                            videoDurationSeconds = videoDurationSeconds,
                             onStatusUpdate = { msg ->
                                 _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = selectedModelName)
                             }
@@ -1528,7 +1561,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     note = "Segmen terakhir dilewati",
                     segmentModels = segmentModels,
                     segmentSummaries = summaries,
-                    narrationMode = currentMode.displayName
+                    narrationMode = analysisMode.displayName
                 )
                 val savedStyle = visualStyleStorage.getStyleForAnalysis(targetId) ?: visualStyleStorage.getSelectedStyle()
                 _analysisState.value = AnalysisState.Success(finalResult, styleName = savedStyle.name)

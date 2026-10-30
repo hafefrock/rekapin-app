@@ -5,29 +5,24 @@ enum class NarrationMode(
     val displayName: String,
     val description: String
 ) {
-    REKAP_CERITA(
-        code = "rekap_cerita",
-        displayName = "Rekap Cerita",
-        description = "Gaya bercerita mengalir dengan alur cerita sinematik"
+    REKAP_VOICEOVER(
+        code = "rekap_voiceover",
+        displayName = "Rekap Voiceover",
+        description = "Narasi rekap baru bergaya voiceover, aman untuk YouTube"
     ),
-    DESKRIPSI(
-        code = "deskripsi",
-        displayName = "Deskripsi Apa Adanya",
-        description = "Hanya mendeskripsikan apa yang benar-benar terlihat di video"
+    DIALOG_KONTEN(
+        code = "dialog_konten",
+        displayName = "Dialog Konten",
+        description = "Transkrip percakapan karakter per timestamp"
     ),
-    PAS_DURASI(
-        code = "pas_durasi",
-        displayName = "Pas Durasi",
-        description = "Jumlah kata disesuaikan dengan total durasi video"
-    ),
-    TANPA_NARASI(
-        code = "tanpa_narasi",
-        displayName = "Tanpa Narasi",
-        description = "Hanya menyusun prompt visual timeline tanpa naskah narasi"
+    NARASI_ASLI(
+        code = "narasi_asli",
+        displayName = "Narasi Asli Konten",
+        description = "Transkrip suara narator yang ada di video"
     );
 
     companion object {
-        val DEFAULT = REKAP_CERITA
+        val DEFAULT = REKAP_VOICEOVER
 
         fun fromDisplayName(name: String?): NarrationMode {
             if (name.isNullOrBlank()) return DEFAULT

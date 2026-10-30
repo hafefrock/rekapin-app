@@ -8,7 +8,9 @@ data class CharacterInfo(
 data class TimelineItem(
     val timestamp: String,
     val sceneDescription: String,
-    val visualPrompt: String
+    val visualPrompt: String,
+    val dialogue: String = "",
+    val originalNarration: String = ""
 )
 
 data class AnimeAnalysisResult(

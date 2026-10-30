@@ -60,13 +60,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
+import com.example.data.model.NarrationMode
 import com.example.data.model.TimelineItem
 
 object ExportFormatters {
     fun formatFullExport(result: AnimeAnalysisResult, narrationModeName: String = ""): String {
         val modeLabel = narrationModeName.ifBlank {
             result.narrationMode.ifBlank {
-                if (result.narration.isBlank()) "Tanpa Narasi" else "Rekap Cerita"
+                NarrationMode.DEFAULT.displayName
             }
         }
         return buildString {
@@ -85,7 +86,12 @@ object ExportFormatters {
             appendLine("==================================================")
             if (result.narration.isNotBlank()) {
                 appendLine()
-                appendLine("A. NARASI ALUR CERITA (RECAP NARRATIVE)")
+                val narrationHeader = when {
+                    modeLabel.contains("Dialog", ignoreCase = true) -> "A. DIALOG KONTEN (CHARACTER DIALOGUE)"
+                    modeLabel.contains("Asli", ignoreCase = true) -> "A. NARASI ASLI KONTEN (ORIGINAL NARRATION)"
+                    else -> "A. NARASI ALUR CERITA (RECAP NARRATIVE)"
+                }
+                appendLine(narrationHeader)
                 appendLine("--------------------------------------------------")
                 appendLine(result.narration)
             }
@@ -184,7 +190,7 @@ fun ResultView(
 
     val effectiveModeName = narrationModeName.ifBlank {
         result.narrationMode.ifBlank {
-            if (result.narration.isBlank()) "Tanpa Narasi" else "Rekap Cerita"
+            NarrationMode.DEFAULT.displayName
         }
     }
 
@@ -223,11 +229,16 @@ fun ResultView(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     val hasNarration = result.narration.isNotBlank()
-    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration) {
+    val narasiTabLabel = when {
+        effectiveModeName.contains("Dialog", ignoreCase = true) -> "a. Dialog"
+        effectiveModeName.contains("Asli", ignoreCase = true) -> "a. Narasi Asli"
+        else -> "a. Narasi"
+    }
+    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration, narasiTabLabel) {
         buildList {
             add("Semua Format")
             if (hasNarration) {
-                add("a. Narasi")
+                add(narasiTabLabel)
             }
             add("b. Karakter (${result.characterSheet.size})")
             add("c. Timeline (${result.timeline.size})")
@@ -427,8 +438,9 @@ fun ResultView(
         val currentTabTitle = tabs.getOrElse(safeSelectedTab) { "Semua Format" }
 
         when {
-            currentTabTitle == "a. Narasi" -> NarrationSection(
+            currentTabTitle == narasiTabLabel || currentTabTitle.startsWith("a. ") -> NarrationSection(
                 narration = result.narration,
+                modeName = effectiveModeName,
                 onCopyNarration = {
                     clipboard.setText(AnnotatedString(result.narration))
                     notify("Tersalin")
@@ -473,6 +485,7 @@ fun ResultView(
             else -> AllResultsSection(
                 result = result,
                 styleName = styleName,
+                narrationModeName = effectiveModeName,
                 onCopyNarration = {
                     clipboard.setText(AnnotatedString(result.narration))
                     notify("Tersalin")
@@ -506,6 +519,7 @@ fun ResultView(
 private fun AllResultsSection(
     result: AnimeAnalysisResult,
     styleName: String = "Anime 2D standar",
+    narrationModeName: String = "",
     onCopyNarration: () -> Unit,
     onCopyCharacters: () -> Unit,
     onCopyTimeline: () -> Unit,
@@ -513,6 +527,15 @@ private fun AllResultsSection(
     onCopyScenePrompt: (String) -> Unit,
     onCopySegmentSummaries: () -> Unit
 ) {
+    val (stepLabel, subtitle) = when {
+        narrationModeName.contains("Dialog", ignoreCase = true) ->
+            "a. Dialog Konten" to "Transkrip percakapan karakter per timestamp"
+        narrationModeName.contains("Asli", ignoreCase = true) ->
+            "a. Narasi Asli Konten" to "Transkrip suara narator asli di dalam video"
+        else ->
+            "a. Narasi Video" to "Rekap alur cerita bergaya voiceover, mengalir dan emosional"
+    }
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxWidth()
@@ -521,8 +544,8 @@ private fun AllResultsSection(
         if (result.narration.isNotBlank()) {
             item {
                 SectionHeader(
-                    stepLabel = "a. Narasi Alur Cerita",
-                    subtitle = "Rekap cerita mengalir bergaya narator anime",
+                    stepLabel = stepLabel,
+                    subtitle = subtitle,
                     onCopy = onCopyNarration,
                     copyLabel = "Salin"
                 )
@@ -619,15 +642,25 @@ private fun AllResultsSection(
 @Composable
 private fun NarrationSection(
     narration: String,
+    modeName: String = "",
     onCopyNarration: () -> Unit
 ) {
+    val (stepLabel, subtitle) = when {
+        modeName.contains("Dialog", ignoreCase = true) ->
+            "a. Dialog Konten" to "Transkrip percakapan karakter per timestamp"
+        modeName.contains("Asli", ignoreCase = true) ->
+            "a. Narasi Asli Konten" to "Transkrip suara narator asli di dalam video"
+        else ->
+            "a. Narasi Video" to "Rekap alur cerita bergaya voiceover, mengalir dan emosional"
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxWidth()
     ) {
         item {
             SectionHeader(
-                stepLabel = "a. Narasi Video",
-                subtitle = "Rekap alur cerita bergaya narator, mengalir dan emosional",
+                stepLabel = stepLabel,
+                subtitle = subtitle,
                 onCopy = onCopyNarration,
                 copyLabel = "Salin"
             )

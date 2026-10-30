@@ -29,8 +29,27 @@ class NarrationModeStorage(context: Context) {
         setMode(NarrationMode.fromDisplayName(displayName))
     }
 
+    /**
+     * Menyimpan mode narasi yang terkunci untuk satu analisis tertentu.
+     */
+    @Synchronized
+    fun saveModeForAnalysis(analysisId: Long, mode: NarrationMode) {
+        prefs.edit().putString(KEY_ANALYSIS_MODE_PREFIX + analysisId, mode.code).apply()
+    }
+
+    /**
+     * Mengambil mode narasi yang tersimpan untuk id analisis.
+     * Mengembalikan null jika belum pernah disimpan.
+     */
+    @Synchronized
+    fun getModeForAnalysis(analysisId: Long): NarrationMode? {
+        val raw = prefs.getString(KEY_ANALYSIS_MODE_PREFIX + analysisId, null) ?: return null
+        return NarrationMode.fromDisplayName(raw)
+    }
+
     companion object {
         private const val PREFS_NAME = "rekapin_narration_mode_prefs"
         private const val KEY_MODE = "narration_mode"
+        private const val KEY_ANALYSIS_MODE_PREFIX = "analysis_mode_"
     }
 }

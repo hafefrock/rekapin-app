@@ -8,7 +8,6 @@ import com.example.data.model.NarrationMode
 import com.example.data.model.SegmentAnalysisOutput
 import com.example.data.model.SelectedVideo
 import com.example.data.model.TimelineItem
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -379,6 +378,8 @@ class GeminiApiClient(
         isFirstSegment: Boolean,
         model: String = GeminiConstants.GEMINI_MODEL,
         stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
+        mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
+        language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
@@ -397,7 +398,9 @@ class GeminiApiClient(
             intervalSeconds = intervalSeconds,
             previousCharacterSheet = previousCharacterSheet,
             isFirstSegment = isFirstSegment,
-            stylePrompt = stylePrompt
+            stylePrompt = stylePrompt,
+            mode = mode,
+            language = language
         )
 
         val requestPayload = JSONObject().apply {
@@ -458,20 +461,12 @@ class GeminiApiClient(
         characterSheet: List<CharacterInfo>,
         model: String = GeminiConstants.GEMINI_MODEL,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
-        mode: NarrationMode = NarrationMode.DEFAULT,
-        videoDurationSeconds: Long = 0L,
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         val stageName = "Penyusunan Narasi Rekap Video"
-
-        if (mode == NarrationMode.TANPA_NARASI) {
-            Log.i(TAG, "[$stageName] Mode TANPA_NARASI aktif. Mengembalikan narasi kosong tanpa memanggil Gemini.")
-            return@withContext ""
-        }
-
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Menyusun narasi (${language.displayName}, mode: ${mode.displayName}) dari ${segmentSummaries.size} ringkasan segmen model '$model' di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Menyusun narasi (${language.displayName}) dari ${segmentSummaries.size} ringkasan segmen model '$model' di thread: ${Thread.currentThread().name}")
 
         val summariesText = segmentSummaries.mapIndexed { idx, sum ->
             "Segment ${idx + 1}: $sum"
@@ -493,129 +488,40 @@ class GeminiApiClient(
         - Treat everything as fiction. Do not mention real people or real-world groups.
         """.trimIndent()
 
-        val pasDurasiLengthInstruction = if (videoDurationSeconds > 0L) {
-            val targetKata = (videoDurationSeconds * 2.3).roundToInt().coerceAtLeast(1)
-            "- Write about $targetKata words in total. Do not exceed this."
+        val instructionBlock = if (language == NarrationLanguage.INDONESIAN) {
+            """
+            INSTRUCTIONS:
+            Write an engaging, fluid, and captivating story recap of the entire episode in natural, highly expressive Bahasa Indonesia (gaya pencerita anime yang hidup, emosional, dramatis, dan mengalir natural, bukan terjemahan harfiah/kaku).
+            - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan, kata kasar, atau hinaan.
+            - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
+            - Keep official character names and terms intact.
+            """.trimIndent()
         } else {
-            "- Keep the narration short and proportional to the number of segments."
+            """
+            INSTRUCTIONS:
+            Write an engaging, fluid, and captivating story recap of the entire episode in natural American English (native USA storytelling voice).
+            - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
+            - Keep official character names and terms intact.
+            """.trimIndent()
         }
 
-        val instructionBlock = when (mode) {
-            NarrationMode.REKAP_CERITA -> {
-                if (language == NarrationLanguage.INDONESIAN) {
-                    """
-                    INSTRUCTIONS:
-                    Write an engaging, fluid, and captivating story recap of the entire episode in natural, highly expressive Bahasa Indonesia (gaya pencerita anime yang hidup, emosional, dramatis, dan mengalir natural, bukan terjemahan harfiah/kaku).
-                    - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan, kata kasar, atau hinaan.
-                    - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                } else {
-                    """
-                    INSTRUCTIONS:
-                    Write an engaging, fluid, and captivating story recap of the entire episode in natural American English (native USA storytelling voice).
-                    - Form an organic narrative arc capturing character motives, rising action, emotional drama, visual tension, and the climax.
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                }
-            }
-            NarrationMode.DESKRIPSI -> {
-                if (language == NarrationLanguage.INDONESIAN) {
-                    """
-                    INSTRUCTIONS:
-                    Write the narration based ONLY on events that visibly happen in the video. Do not invent atmosphere, backstory, inner thoughts, or events that are not shown. Use short, direct sentences in natural, expressive Bahasa Indonesia.
-                    - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan, kata kasar, atau hinaan.
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                } else {
-                    """
-                    INSTRUCTIONS:
-                    Write the narration based ONLY on events that visibly happen in the video. Do not invent atmosphere, backstory, inner thoughts, or events that are not shown. Use short, direct sentences in natural American English.
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                }
-            }
-            NarrationMode.PAS_DURASI -> {
-                if (language == NarrationLanguage.INDONESIAN) {
-                    """
-                    INSTRUCTIONS:
-                    Write the narration based ONLY on events that visibly happen in the video. Do not invent atmosphere, backstory, inner thoughts, or events that are not shown. Use short, direct sentences in natural, expressive Bahasa Indonesia.
-                    $pasDurasiLengthInstruction
-                    - Gunakan Bahasa Indonesia yang sopan, hidup, dan natural, tanpa umpatan, kata kasar, atau hinaan.
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                } else {
-                    """
-                    INSTRUCTIONS:
-                    Write the narration based ONLY on events that visibly happen in the video. Do not invent atmosphere, backstory, inner thoughts, or events that are not shown. Use short, direct sentences in natural American English.
-                    $pasDurasiLengthInstruction
-                    - Keep official character names and terms intact.
-                    """.trimIndent()
-                }
-            }
-            NarrationMode.TANPA_NARASI -> ""
-        }
-
-        val formatBlock = when (mode) {
-            NarrationMode.REKAP_CERITA -> {
-                val introHint = if (language == NarrationLanguage.INDONESIAN) {
-                    "e.g. do NOT include \"Berikut adalah rekap...\", \"Here is the recap...\", or similar phrases"
-                } else {
-                    "e.g. do NOT include \"Here is the recap...\", \"Here is the story...\", or similar opening remarks"
-                }
-                """
-                VOICE-OVER OUTPUT FORMAT:
-                - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
-                - Exactly 3 to 5 flowing paragraphs.
-                - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
-                - Absolutely NO conversational intro or greeting ($introHint). Start directly with the narration.
-                """.trimIndent()
-            }
-            NarrationMode.DESKRIPSI -> {
-                val introHint = if (language == NarrationLanguage.INDONESIAN) {
-                    "e.g. do NOT include \"Berikut adalah rekap...\", \"Here is the recap...\", or similar phrases"
-                } else {
-                    "e.g. do NOT include \"Here is the recap...\", \"Here is the story...\", or similar opening remarks"
-                }
-                """
-                VOICE-OVER OUTPUT FORMAT:
-                - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
-                - 1 to 2 short paragraphs.
-                - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
-                - Absolutely NO conversational intro or greeting ($introHint). Start directly with the narration.
-                """.trimIndent()
-            }
-            NarrationMode.PAS_DURASI -> {
-                val introHint = if (language == NarrationLanguage.INDONESIAN) {
-                    "e.g. do NOT include \"Berikut adalah rekap...\", \"Here is the recap...\", or similar phrases"
-                } else {
-                    "e.g. do NOT include \"Here is the recap...\", \"Here is the story...\", or similar opening remarks"
-                }
-                """
-                VOICE-OVER OUTPUT FORMAT:
-                - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
-                - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
-                - Absolutely NO conversational intro or greeting ($introHint). Start directly with the narration.
-                """.trimIndent()
-            }
-            NarrationMode.TANPA_NARASI -> ""
-        }
-
-        val persona = if (mode == NarrationMode.REKAP_CERITA) {
-            "You are a master anime storyteller and narrator."
+        val introHint = if (language == NarrationLanguage.INDONESIAN) {
+            "e.g. do NOT include \"Berikut adalah rekap...\", \"Here is the recap...\", or similar phrases"
         } else {
-            "You are a precise video narrator. You only describe what is actually shown."
+            "e.g. do NOT include \"Here is the recap...\", \"Here is the story...\", or similar opening remarks"
         }
 
-        val basedOn = if (mode == NarrationMode.REKAP_CERITA) {
-            "Based on the chronological progression of this complete anime episode:"
-        } else {
-            "Based on the events shown in this video:"
-        }
+        val formatBlock = """
+        VOICE-OVER OUTPUT FORMAT:
+        - Provide output ready for voice-over: clean prose paragraphs with short-to-medium sentences.
+        - Exactly 3 to 5 flowing paragraphs.
+        - Absolutely NO markdown (no asterisks, no bold/italics), NO titles or headings, NO emojis, NO parentheses, NO sound effects, and NO timestamps.
+        - Absolutely NO conversational intro or greeting ($introHint). Start directly with the narration.
+        """.trimIndent()
 
         val prompt = """
-        $persona
-        $basedOn
+        You are a master anime storyteller and narrator.
+        Based on the chronological progression of this complete anime episode:
 
         CHRONOLOGICAL SEGMENTS:
         $summariesText
@@ -838,7 +744,9 @@ class GeminiApiClient(
         intervalSeconds: Int,
         previousCharacterSheet: List<CharacterInfo>,
         isFirstSegment: Boolean,
-        stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art"
+        stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
+        mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
+        language: NarrationLanguage = NarrationLanguage.ENGLISH_USA
     ): String {
         val sampleTimestamps = if (isFirstSegment) {
             "00:00 - 00:05, 00:05 - 00:10"
@@ -872,6 +780,38 @@ class GeminiApiClient(
             """.trimIndent()
         }
 
+        val transcriptLanguageInstruction = if (language == NarrationLanguage.INDONESIAN) {
+            "Write the transcript in natural Bahasa Indonesia; translate it if the audio is in another language."
+        } else {
+            "Write the transcript in natural American English; translate it if the audio is in another language."
+        }
+
+        val timelineItemSchema = when (mode) {
+            NarrationMode.DIALOG_KONTEN -> """
+                {
+                  "timestamp": "MM:SS - MM:SS",
+                  "sceneDescription": "Short, vivid description of the scene in natural American English.",
+                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
+                  "dialogue": "Transcribe the spoken lines of characters heard in this time window, as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. Transcribe faithfully and do not invent lines. $transcriptLanguageInstruction"
+                }
+            """.trimIndent()
+            NarrationMode.NARASI_ASLI -> """
+                {
+                  "timestamp": "MM:SS - MM:SS",
+                  "sceneDescription": "Short, vivid description of the scene in natural American English.",
+                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
+                  "originalNarration": "Transcribe only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. Transcribe faithfully and do not invent. $transcriptLanguageInstruction"
+                }
+            """.trimIndent()
+            NarrationMode.REKAP_VOICEOVER -> """
+                {
+                  "timestamp": "MM:SS - MM:SS",
+                  "sceneDescription": "Short, vivid description of the scene in natural American English.",
+                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere]."
+                }
+            """.trimIndent()
+        }
+
         return """
             You are an expert anime visual director and storyboard analyst.
             Analyze the provided video segment between $startFormatted and $endFormatted.
@@ -881,7 +821,7 @@ class GeminiApiClient(
             - Start exactly at $startFormatted and proceed consecutively until $endFormatted.
             
             LANGUAGE:
-            - ALL output text (descriptions, visual prompts, and character sheet) MUST be written in natural American English (native USA speaker style, rich vocabulary).
+            - ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English, EXCEPT the dialogue and originalNarration fields, which follow the language stated in their own instructions.
             
             $characterContext
             
@@ -896,11 +836,7 @@ class GeminiApiClient(
                 }
               ],
               "timeline": [
-                {
-                  "timestamp": "MM:SS - MM:SS",
-                  "sceneDescription": "Short, vivid description of the scene in natural American English.",
-                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere]."
-                }
+$timelineItemSchema
               ]
             }
             
@@ -952,12 +888,16 @@ class GeminiApiClient(
                     val timestamp = item.optString("timestamp", "")
                     val sceneDescription = item.optString("sceneDescription", "")
                     val visualPrompt = item.optString("visualPrompt", "")
+                    val dialogue = item.optString("dialogue", "")
+                    val originalNarration = item.optString("originalNarration", "")
                     if (timestamp.isNotBlank() || sceneDescription.isNotBlank()) {
                         timelineList.add(
                             TimelineItem(
                                 timestamp = timestamp,
                                 sceneDescription = sceneDescription,
-                                visualPrompt = visualPrompt
+                                visualPrompt = visualPrompt,
+                                dialogue = dialogue,
+                                originalNarration = originalNarration
                             )
                         )
                     }

@@ -225,6 +225,7 @@ fun HomeScreen(
         HistoryDetailScreen(
             entity = historyEntity,
             styleName = viewModel.getStyleNameForAnalysis(historyEntity.id),
+            narrationModeName = viewModel.getModeNameForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
                 requestNotificationAndStart {

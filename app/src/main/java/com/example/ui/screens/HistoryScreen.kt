@@ -387,6 +387,7 @@ private fun HistoryItemCard(
 fun HistoryDetailScreen(
     entity: AnimeAnalysisEntity,
     styleName: String = "Anime 2D standar",
+    narrationModeName: String = "",
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -479,6 +480,7 @@ fun HistoryDetailScreen(
             ResultView(
                 result = result,
                 styleName = styleName,
+                narrationModeName = narrationModeName,
                 modifier = Modifier.fillMaxSize()
             )
         }

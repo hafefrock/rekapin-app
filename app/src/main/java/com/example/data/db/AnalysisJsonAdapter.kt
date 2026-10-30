@@ -43,6 +43,8 @@ object AnalysisJsonAdapter {
                 put("timestamp", item.timestamp)
                 put("sceneDescription", item.sceneDescription)
                 put("visualPrompt", item.visualPrompt)
+                put("dialogue", item.dialogue)
+                put("originalNarration", item.originalNarration)
             }
             array.put(obj)
         }
@@ -59,12 +61,16 @@ object AnalysisJsonAdapter {
                 val timestamp = obj.optString("timestamp", "")
                 val sceneDescription = obj.optString("sceneDescription", "")
                 val visualPrompt = obj.optString("visualPrompt", "")
+                val dialogue = obj.optString("dialogue", "")
+                val originalNarration = obj.optString("originalNarration", "")
                 if (timestamp.isNotBlank() || sceneDescription.isNotBlank()) {
                     result.add(
                         TimelineItem(
                             timestamp = timestamp,
                             sceneDescription = sceneDescription,
-                            visualPrompt = visualPrompt
+                            visualPrompt = visualPrompt,
+                            dialogue = dialogue,
+                            originalNarration = originalNarration
                         )
                     )
                 }
