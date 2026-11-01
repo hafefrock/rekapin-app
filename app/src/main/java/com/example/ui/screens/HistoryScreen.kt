@@ -485,8 +485,9 @@ private fun HistoryItemCard(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
+                    val intervalText = if (entity.intervalSeconds == 0) "Per Adegan" else "Interval ${entity.intervalSeconds}s"
                     Text(
-                        text = "Interval ${entity.intervalSeconds}s",
+                        text = intervalText,
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

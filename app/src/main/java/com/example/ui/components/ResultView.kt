@@ -80,7 +80,8 @@ object ExportFormatters {
             }
             appendLine("Durasi Video       : ${result.durationFormatted}")
             appendLine("Total Segmen       : ${result.totalSegments}")
-            appendLine("Interval Prompt    : ${result.intervalSeconds} detik")
+            val intervalLabel = if (result.intervalSeconds == 0) "Per Adegan" else "${result.intervalSeconds} detik"
+            appendLine("Interval Prompt    : $intervalLabel")
             appendLine("Mode Narasi        : $modeLabel")
             appendLine("Total Karakter     : ${result.characterSheet.size}")
             appendLine("Total Prompt Adegan: ${result.timeline.size}")
@@ -108,7 +109,8 @@ object ExportFormatters {
                     appendLine()
                 }
             }
-            appendLine("C. TIMELINE VISUAL PROMPT (INTERVAL ${result.intervalSeconds}s)")
+            val timelineIntervalLabel = if (result.intervalSeconds == 0) "PER ADEGAN" else "INTERVAL ${result.intervalSeconds}s"
+            appendLine("C. TIMELINE VISUAL PROMPT ($timelineIntervalLabel)")
             appendLine("--------------------------------------------------")
             if (result.timeline.isEmpty()) {
                 appendLine("Tidak ada timeline visual prompt.")
@@ -151,7 +153,8 @@ object ExportFormatters {
     fun formatTimeline(timeline: List<TimelineItem>, intervalSeconds: Int): String {
         if (timeline.isEmpty()) return "Timeline kosong."
         return buildString {
-            appendLine("=== TIMELINE VISUAL PROMPT (Interval $intervalSeconds Detik) ===")
+            val titleLabel = if (intervalSeconds == 0) "Per Adegan" else "Interval $intervalSeconds Detik"
+            appendLine("=== TIMELINE VISUAL PROMPT ($titleLabel) ===")
             timeline.forEachIndexed { index, item ->
                 appendLine("[${item.timestamp}] Adegan #${index + 1}: ${item.sceneDescription}")
                 appendLine("Visual Prompt: ${item.visualPrompt}")
@@ -487,8 +490,9 @@ fun ResultView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        val intervalDisplay = if (result.intervalSeconds == 0) "Per Adegan" else "${result.intervalSeconds} detik"
                         Text(
-                            text = "Interval Prompt: ${result.intervalSeconds} detik",
+                            text = "Interval Prompt: $intervalDisplay",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -798,9 +802,14 @@ private fun AllResultsSection(
         // Section c: Timeline Visual Prompt
         item {
             Spacer(modifier = Modifier.height(8.dp))
+            val timelineSubtitle = if (result.intervalSeconds == 0) {
+                "Mode Per Adegan dengan $styleName prompt"
+            } else {
+                "Interval ${result.intervalSeconds} detik dengan $styleName prompt"
+            }
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt",
-                subtitle = "Interval ${result.intervalSeconds} detik dengan $styleName prompt",
+                subtitle = timelineSubtitle,
                 onCopy = onCopyTimeline,
                 copyLabel = "Salin"
             )
@@ -933,9 +942,14 @@ private fun TimelineSection(
         modifier = Modifier.fillMaxWidth()
     ) {
         item {
+            val timelineSubtitle = if (intervalSeconds == 0) {
+                "Mode Per Adegan, prompt $styleName"
+            } else {
+                "Interval $intervalSeconds detik, prompt $styleName"
+            }
             SectionHeader(
                 stepLabel = "c. Timeline Visual Prompt (${timeline.size} Adegan)",
-                subtitle = "Interval $intervalSeconds detik, prompt $styleName",
+                subtitle = timelineSubtitle,
                 onCopy = onCopyTimeline,
                 copyLabel = "Salin"
             )

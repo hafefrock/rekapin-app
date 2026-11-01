@@ -844,7 +844,8 @@ class ExampleUnitTest {
             Boolean::class.javaPrimitiveType,
             String::class.java,
             com.example.data.model.NarrationMode::class.java,
-            com.example.data.model.NarrationLanguage::class.java
+            com.example.data.model.NarrationLanguage::class.java,
+            List::class.java
         )
         method.isAccessible = true
 
@@ -860,7 +861,8 @@ class ExampleUnitTest {
             true,
             customPromptDesc,
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
-            com.example.data.model.NarrationLanguage.ENGLISH_USA
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            emptyList<String>()
         ) as String
 
         // Memastikan prompt mengandung deskripsi gaya terpilih
@@ -892,7 +894,8 @@ class ExampleUnitTest {
             Boolean::class.javaPrimitiveType,
             String::class.java,
             com.example.data.model.NarrationMode::class.java,
-            com.example.data.model.NarrationLanguage::class.java
+            com.example.data.model.NarrationLanguage::class.java,
+            List::class.java
         )
         method.isAccessible = true
 
@@ -901,16 +904,23 @@ class ExampleUnitTest {
             client, "00:00", "03:00", 0L, 180L, 5,
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.DIALOG_KONTEN,
-            com.example.data.model.NarrationLanguage.INDONESIAN
+            com.example.data.model.NarrationLanguage.INDONESIAN,
+            emptyList<String>()
         ) as String
 
         assertTrue(
-            "Prompt Dialog Konten Indonesia harus memuat instruksi Bahasa Indonesia",
-            promptDialogId.contains("Write the transcript in natural Bahasa Indonesia; translate it if the audio is in another language.")
+            "Prompt Dialog Konten Indonesia harus memuat aturan LANGUAGE (STRICT) dengan Indonesian",
+            promptDialogId.contains("LANGUAGE (STRICT):") &&
+                    promptDialogId.contains("The output language is Indonesian. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.") &&
+                    promptDialogId.contains("You MUST translate everything you hear into Indonesian. Never copy the original spoken language.")
         )
         assertTrue(
-            "Bagian LANGUAGE harus memuat instruksi pengecualian dialogue & originalNarration",
-            promptDialogId.contains("ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English, EXCEPT the dialogue and originalNarration fields, which follow the language stated in their own instructions.")
+            "Field dialogue harus memuat instruksi Translate faithfully into Indonesian",
+            promptDialogId.contains("Translate faithfully into Indonesian: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in Indonesian even if the audio is in another language.")
+        )
+        assertTrue(
+            "Prompt Dialog Konten harus memuat pengingat Final check di akhir sebelum JSON format",
+            promptDialogId.contains("Final check: every 'dialogue' and 'originalNarration' value must be written in Indonesian.")
         )
 
         // 2. NARASI_ASLI dengan Bahasa Inggris USA
@@ -918,12 +928,41 @@ class ExampleUnitTest {
             client, "00:00", "03:00", 0L, 180L, 5,
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.NARASI_ASLI,
-            com.example.data.model.NarrationLanguage.ENGLISH_USA
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            emptyList<String>()
         ) as String
 
         assertTrue(
-            "Prompt Narasi Asli English USA harus memuat instruksi American English",
-            promptNarasiAsliEn.contains("Write the transcript in natural American English; translate it if the audio is in another language.")
+            "Prompt Narasi Asli English USA harus memuat aturan LANGUAGE (STRICT) dengan American English",
+            promptNarasiAsliEn.contains("LANGUAGE (STRICT):") &&
+                    promptNarasiAsliEn.contains("The output language is American English. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.") &&
+                    promptNarasiAsliEn.contains("You MUST translate everything you hear into American English. Never copy the original spoken language.")
+        )
+        assertTrue(
+            "Field originalNarration harus memuat instruksi Translate faithfully into American English",
+            promptNarasiAsliEn.contains("Translate faithfully into American English: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in American English even if the audio is in another language.")
+        )
+        assertTrue(
+            "Prompt Narasi Asli harus memuat pengingat Final check di akhir sebelum JSON format",
+            promptNarasiAsliEn.contains("Final check: every 'dialogue' and 'originalNarration' value must be written in American English.")
+        )
+
+        // 3. REKAP_VOICEOVER tidak boleh memuat LANGUAGE (STRICT) dan tidak boleh memuat pengingat Final check
+        val promptRekap = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.INDONESIAN,
+            emptyList<String>()
+        ) as String
+
+        assertTrue(
+            "Prompt Rekap Voiceover harus tetap memakai aturan bahasa umum",
+            promptRekap.contains("ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English.")
+        )
+        org.junit.Assert.assertFalse(
+            "Prompt Rekap Voiceover tidak boleh memuat Final check dialog/narasi",
+            promptRekap.contains("Final check: every 'dialogue' and 'originalNarration' value must be written in")
         )
     }
 
@@ -1059,5 +1098,122 @@ class ExampleUnitTest {
         assertTrue(mergedText.contains("[00:00 - 00:05] Adegan #1: Opening ship shot"))
         // timeline2 was 00:00 - 00:10, shifted by 120s -> 02:00 - 02:10
         assertTrue(mergedText.contains("[02:00 - 02:10] Adegan #2: Island appears"))
+    }
+
+    @Test
+    fun testPromptCutModeModelAndStorage() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        val storage = com.example.data.prefs.PromptCutModeStorage(app)
+
+        // Default mode must be FIXED_INTERVAL
+        assertEquals(com.example.data.model.PromptCutMode.DEFAULT, com.example.data.model.PromptCutMode.FIXED_INTERVAL)
+        storage.setMode(com.example.data.model.PromptCutMode.FIXED_INTERVAL)
+        assertEquals(com.example.data.model.PromptCutMode.FIXED_INTERVAL, storage.getMode())
+
+        // Switch to PER_SCENE
+        storage.setMode(com.example.data.model.PromptCutMode.PER_SCENE)
+        assertEquals(com.example.data.model.PromptCutMode.PER_SCENE, storage.getMode())
+
+        // Max scene duration default is 5s
+        storage.setMaxSceneDuration(3)
+        assertEquals(3, storage.getMaxSceneDuration())
+        storage.setMaxSceneDuration(5)
+        assertEquals(5, storage.getMaxSceneDuration())
+
+        // Per analysis mode locking
+        storage.saveModeForAnalysis(555L, com.example.data.model.PromptCutMode.PER_SCENE)
+        assertEquals(com.example.data.model.PromptCutMode.PER_SCENE, storage.getModeForAnalysis(555L))
+        storage.setMode(com.example.data.model.PromptCutMode.FIXED_INTERVAL)
+        // Locked mode for analysis 555 should remain PER_SCENE
+        assertEquals(com.example.data.model.PromptCutMode.PER_SCENE, storage.getModeForAnalysis(555L))
+    }
+
+    @Test
+    fun testSceneDetectorGetScenesForSegment() {
+        val allScenes = listOf(
+            com.example.util.SceneTimeSpan(0, 3),
+            com.example.util.SceneTimeSpan(3, 7),
+            com.example.util.SceneTimeSpan(7, 10),
+            com.example.util.SceneTimeSpan(10, 15),
+            com.example.util.SceneTimeSpan(180, 185)
+        )
+
+        // Segment 0s to 10s (00:00 to 00:10)
+        val seg1 = com.example.util.SceneDetector.getScenesForSegment(allScenes, 0L, 10L)
+        assertEquals(3, seg1.size)
+        assertEquals("00:00 - 00:03", seg1[0])
+        assertEquals("00:03 - 00:07", seg1[1])
+        assertEquals("00:07 - 00:10", seg1[2])
+
+        // Empty segment should fall back to single range or full segment
+        val emptySeg = com.example.util.SceneDetector.getScenesForSegment(allScenes, 60L, 75L)
+        assertEquals(1, emptySeg.size)
+        assertEquals("01:00 - 01:15", emptySeg[0])
+    }
+
+    @Test
+    fun testPromptCutModeExactSceneSpansInPrompt() {
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "dummy-key" })
+
+        val method = com.example.data.api.GeminiApiClient::class.java.getDeclaredMethod(
+            "buildSegmentPrompt",
+            String::class.java,
+            String::class.java,
+            Long::class.javaPrimitiveType,
+            Long::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            List::class.java,
+            Boolean::class.javaPrimitiveType,
+            String::class.java,
+            com.example.data.model.NarrationMode::class.java,
+            com.example.data.model.NarrationLanguage::class.java,
+            List::class.java
+        )
+        method.isAccessible = true
+
+        val exactScenes = listOf("00:00 - 00:04", "00:04 - 00:07", "00:07 - 00:10")
+        val prompt = method.invoke(
+            client, "00:00", "00:10", 0L, 10L, 0,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            exactScenes
+        ) as String
+
+        assertTrue(prompt.contains("TIMESTAMPS (PER ADEGAN - EXACT REQUIRED LIST):"))
+        assertTrue(prompt.contains("\"00:00 - 00:04\""))
+        assertTrue(prompt.contains("\"00:04 - 00:07\""))
+        assertTrue(prompt.contains("\"00:07 - 00:10\""))
+        assertTrue(prompt.contains("Total timeline items required: 3"))
+    }
+
+    @Test
+    fun testExportFormattersPerSceneModeNeverShowsZeroDetik() {
+        val result = com.example.data.model.AnimeAnalysisResult(
+            durationFormatted = "05:00",
+            totalSegments = 2,
+            intervalSeconds = 0, // 0 = Per Adegan
+            videoName = "Test Anime",
+            characterSheet = emptyList(),
+            timeline = listOf(
+                com.example.data.model.TimelineItem(
+                    timestamp = "00:00 - 00:04",
+                    sceneDescription = "Character stands on rooftop",
+                    visualPrompt = "2D anime style, wind blowing"
+                )
+            ),
+            narration = "Recap text",
+            segmentSummaries = emptyList()
+        )
+
+        val fullExport = com.example.ui.components.ExportFormatters.formatFullExport(result)
+        assertTrue("Export harus menuliskan 'Per Adegan'", fullExport.contains("Interval Prompt    : Per Adegan"))
+        assertTrue("Timeline header harus menuliskan 'PER ADEGAN'", fullExport.contains("C. TIMELINE VISUAL PROMPT (PER ADEGAN)"))
+        org.junit.Assert.assertFalse("Tidak boleh ada teks '0 detik'", fullExport.contains("0 detik"))
+        org.junit.Assert.assertFalse("Tidak boleh ada teks 'INTERVAL 0s'", fullExport.contains("INTERVAL 0s"))
+
+        val timelineExport = com.example.ui.components.ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)
+        assertTrue(timelineExport.contains("=== TIMELINE VISUAL PROMPT (Per Adegan) ==="))
+        org.junit.Assert.assertFalse(timelineExport.contains("0 Detik"))
     }
 }

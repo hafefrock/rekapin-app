@@ -76,6 +76,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -110,8 +111,10 @@ import com.example.data.api.GeminiConstants
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.model.AnalysisState
 import com.example.data.model.ModelUsageInfo
+import com.example.data.model.PromptCutMode
 import com.example.data.model.SelectedVideo
 import com.example.data.model.VisualStyle
+import androidx.compose.foundation.BorderStroke
 import com.example.ui.components.KeySelectionDialog
 import com.example.ui.components.ManualQuotaDialog
 import com.example.ui.components.ResultView
@@ -148,6 +151,9 @@ fun HomeScreen(
     val analysisRangeEndSec by viewModel.analysisRangeEndSec.collectAsState()
     val selectedSeriesSourceId by viewModel.selectedSeriesSourceId.collectAsState()
     val selectedSeriesSourceName by viewModel.selectedSeriesSourceName.collectAsState()
+    val promptCutMode by viewModel.promptCutMode.collectAsState()
+    val maxSceneDurationSeconds by viewModel.maxSceneDurationSeconds.collectAsState()
+    val detectedSceneCount by viewModel.detectedSceneCount.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -394,8 +400,9 @@ fun HomeScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                                val intervalLabel = if (state.result.intervalSeconds == 0) "Per Adegan" else "Interval ${state.result.intervalSeconds}s"
                                 Text(
-                                    text = "${state.result.totalSegments} Segmen • Interval ${state.result.intervalSeconds}s (Tersimpan di Riwayat)",
+                                    text = "${state.result.totalSegments} Segmen • $intervalLabel (Tersimpan di Riwayat)",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -485,6 +492,11 @@ fun HomeScreen(
                     IdleSetupContent(
                         selectedVideo = selectedVideo,
                         promptInterval = promptInterval,
+                        promptCutMode = promptCutMode,
+                        maxSceneDurationSeconds = maxSceneDurationSeconds,
+                        detectedSceneCount = detectedSceneCount,
+                        onPromptCutModeChanged = { viewModel.setPromptCutMode(it) },
+                        onMaxSceneDurationChanged = { viewModel.setMaxSceneDuration(it) },
                         segmentDurationOption = segmentDurationOption,
                         segmentPlanSummary = segmentPlanSummary,
                         historyList = historyList,
@@ -658,6 +670,11 @@ fun HomeScreen(
 private fun IdleSetupContent(
     selectedVideo: SelectedVideo?,
     promptInterval: Int,
+    promptCutMode: PromptCutMode,
+    maxSceneDurationSeconds: Int,
+    detectedSceneCount: Int?,
+    onPromptCutModeChanged: (PromptCutMode) -> Unit,
+    onMaxSceneDurationChanged: (Int) -> Unit,
     segmentDurationOption: SegmentDurationOption,
     segmentPlanSummary: SegmentPlanSummary?,
     historyList: List<AnimeAnalysisEntity>,
@@ -1512,9 +1529,9 @@ private fun IdleSetupContent(
             }
         }
 
-        // Section 3: Pilihan Interval Visual Prompt
+        // Section 3: Pengaturan Interval Visual Prompt / Mode Potong Prompt
         Text(
-            text = "3. Pilihan Interval Visual Prompt",
+            text = if (promptCutMode == PromptCutMode.PER_SCENE) "3. Mode Potong Prompt & Batas Durasi Adegan" else "3. Pilihan Interval Visual Prompt",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             color = MaterialTheme.colorScheme.onSurface
@@ -1526,150 +1543,378 @@ private fun IdleSetupContent(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                // Option 10 Detik
+                // Pilihan Mode Potong Prompt
+                Text(
+                    text = "Mode Potong Prompt",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onIntervalChanged(10) }
-                        .background(
-                            if (promptInterval == 10) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("interval_10s_option"),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    RadioButton(
-                        selected = (promptInterval == 10),
-                        onClick = { onIntervalChanged(10) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isFixed = (promptCutMode == PromptCutMode.FIXED_INTERVAL)
+                    // Chip Interval Tetap
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isFixed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(
+                            1.dp,
+                            if (isFixed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onPromptCutModeChanged(PromptCutMode.FIXED_INTERVAL) }
+                            .testTag("chip_cut_mode_fixed")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isFixed,
+                                onClick = { onPromptCutModeChanged(PromptCutMode.FIXED_INTERVAL) },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(
+                                    text = "Interval Tetap",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (isFixed) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Bawaan",
+                                    fontSize = 10.sp,
+                                    color = if (isFixed) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    val isScene = (promptCutMode == PromptCutMode.PER_SCENE)
+                    // Chip Per Adegan
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isScene) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(
+                            1.dp,
+                            if (isScene) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onPromptCutModeChanged(PromptCutMode.PER_SCENE) }
+                            .testTag("chip_cut_mode_scene")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isScene,
+                                onClick = { onPromptCutModeChanged(PromptCutMode.PER_SCENE) },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(
+                                    text = "Per Adegan",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (isScene) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Deteksi lokal",
+                                    fontSize = 10.sp,
+                                    color = if (isScene) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (promptCutMode == PromptCutMode.PER_SCENE) {
+                    // Helper text
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "10 Detik",
+                                text = "Adegan dideteksi otomatis dari pergantian gambar, tanpa AI dan tanpa kuota.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Batas maksimum durasi satu adegan:",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Option 5 Detik Max
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onMaxSceneDurationChanged(5) }
+                            .background(
+                                if (maxSceneDurationSeconds == 5) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_5s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (maxSceneDurationSeconds == 5),
+                            onClick = { onMaxSceneDurationChanged(5) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "5 Detik",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Bawaan",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Adegan yang lebih panjang dari 5 detik dipecah per 5 detik",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Option 3 Detik Max
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onMaxSceneDurationChanged(3) }
+                            .background(
+                                if (maxSceneDurationSeconds == 3) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_3s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (maxSceneDurationSeconds == 3),
+                            onClick = { onMaxSceneDurationChanged(3) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "3 Detik",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Stabil & Cepat",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Paling hemat kuota dan stabil untuk mencegah server Google sibuk (503)",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Option 5 Detik (Default)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onIntervalChanged(5) }
-                        .background(
-                            if (promptInterval == 5) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("interval_5s_option"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = (promptInterval == 5),
-                        onClick = { onIntervalChanged(5) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "5 Detik",
+                                text = "Adegan yang lebih panjang dari 3 detik dipecah per 3 detik",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    // Option 10 Detik
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onIntervalChanged(10) }
+                            .background(
+                                if (promptInterval == 10) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_10s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (promptInterval == 10),
+                            onClick = { onIntervalChanged(10) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "10 Detik",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Stabil & Cepat",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Paling hemat kuota dan stabil untuk mencegah server Google sibuk (503)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Option 5 Detik (Default)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onIntervalChanged(5) }
+                            .background(
+                                if (promptInterval == 5) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_5s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (promptInterval == 5),
+                            onClick = { onIntervalChanged(5) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "5 Detik",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.primaryContainer)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Default",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Rekomendasi optimal untuk video anime (hemat kuota & cepat)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Option 3 Detik
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onIntervalChanged(3) }
+                            .background(
+                                if (promptInterval == 3) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_3s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (promptInterval == 3),
+                            onClick = { onIntervalChanged(3) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "3 Detik",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Default",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
+                            Text(
+                                text = "Detail adegan visual lebih rapat untuk aksi cepat dan animasi dinamis",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Text(
-                            text = "Rekomendasi optimal untuk video anime (hemat kuota & cepat)",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Option 3 Detik
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onIntervalChanged(3) }
-                        .background(
-                            if (promptInterval == 3) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("interval_3s_option"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = (promptInterval == 3),
-                        onClick = { onIntervalChanged(3) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "3 Detik",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Detail adegan visual lebih rapat untuk aksi cepat dan animasi dinamis",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -2136,22 +2381,42 @@ private fun IdleSetupContent(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // 4. Perkiraan jumlah adegan
+                    // 4. Perkiraan jumlah adegan / Jumlah adegan terdeteksi
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Perkiraan Jumlah Adegan",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "±${segmentPlanSummary.estimatedScenesCount} adegan visual",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (promptCutMode == PromptCutMode.PER_SCENE) {
+                            Text(
+                                text = "Jumlah adegan terdeteksi",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val countLabel = if (detectedSceneCount != null) {
+                                "$detectedSceneCount adegan"
+                            } else {
+                                "Dihitung saat mulai"
+                            }
+                            Text(
+                                text = countLabel,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text(
+                                text = "Perkiraan Jumlah Adegan",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "±${segmentPlanSummary.estimatedScenesCount} adegan visual",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))

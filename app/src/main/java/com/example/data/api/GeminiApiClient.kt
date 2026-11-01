@@ -380,6 +380,7 @@ class GeminiApiClient(
         stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
         mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
+        exactSceneSpans: List<String> = emptyList(),
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
@@ -387,7 +388,7 @@ class GeminiApiClient(
         val stageName = "Analisis Segmen $currentSegment dari $totalSegments ($startFormatted - $endFormatted)"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Memulai analisis model '$model' offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Memulai analisis model '$model' offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s (adegan: ${exactSceneSpans.size}) di thread: ${Thread.currentThread().name}")
         Log.d(TAG, "[$stageName] Karakter yang telah dikenal sebelumnya: ${previousCharacterSheet.map { it.name }}")
 
         val prompt = buildSegmentPrompt(
@@ -400,7 +401,8 @@ class GeminiApiClient(
             isFirstSegment = isFirstSegment,
             stylePrompt = stylePrompt,
             mode = mode,
-            language = language
+            language = language,
+            exactSceneSpans = exactSceneSpans
         )
 
         val requestPayload = JSONObject().apply {
@@ -448,8 +450,30 @@ class GeminiApiClient(
         )
 
         val output = parseSegmentOutput(stageName, responseJsonString)
-        Log.i(TAG, "[$stageName] Berhasil! Ringkasan: \"${output.segmentSummary.take(60)}...\", Karakter: ${output.characterSheet.size}, Timeline items: ${output.timeline.size}")
-        output
+
+        val finalOutput = if (exactSceneSpans.isNotEmpty() && output.timeline.size != exactSceneSpans.size) {
+            Log.w(TAG, "[$stageName] Validasi adegan: didapat ${output.timeline.size} item, diminta ${exactSceneSpans.size}. Mencoba ulang satu kali...")
+            try {
+                val retryJson = executeWithRetry(
+                    stage = "$stageName (Coba Ulang Validasi Adegan)",
+                    url = endpoint,
+                    jsonBody = requestPayload,
+                    modelForCounting = model.trim(),
+                    onStatusUpdate = onStatusUpdate
+                )
+                val retryOutput = parseSegmentOutput(stageName, retryJson)
+                Log.i(TAG, "[$stageName] Hasil coba ulang: didapat ${retryOutput.timeline.size} item.")
+                retryOutput
+            } catch (e: Exception) {
+                Log.w(TAG, "[$stageName] Percobaan ulang validasi adegan gagal: ${e.message}, tetap memakai hasil pertama.")
+                output
+            }
+        } else {
+            output
+        }
+
+        Log.i(TAG, "[$stageName] Berhasil! Ringkasan: \"${finalOutput.segmentSummary.take(60)}...\", Karakter: ${finalOutput.characterSheet.size}, Timeline items: ${finalOutput.timeline.size}")
+        finalOutput
     }
 
     /**
@@ -877,12 +901,30 @@ class GeminiApiClient(
         isFirstSegment: Boolean,
         stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
         mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
-        language: NarrationLanguage = NarrationLanguage.ENGLISH_USA
+        language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
+        exactSceneSpans: List<String> = emptyList()
     ): String {
         val sampleTimestamps = if (isFirstSegment) {
             "00:00 - 00:05, 00:05 - 00:10"
         } else {
             "$startFormatted - ${formatTimeSeconds(startSec + intervalSeconds)}"
+        }
+
+        val timestampsBlock = if (exactSceneSpans.isNotEmpty()) {
+            val listFormatted = exactSceneSpans.joinToString("\n") { "  - \"$it\"" }
+            """
+            TIMESTAMPS (PER ADEGAN - EXACT REQUIRED LIST):
+            You MUST create exactly one timeline entry for each of the following required timestamp ranges, in this exact sequence, with no gaps and no overlaps:
+$listFormatted
+            - Each timeline entry's "timestamp" field MUST exactly match its assigned range from the list above.
+            - Total timeline items required: ${exactSceneSpans.size}.
+            """.trimIndent()
+        } else {
+            """
+            TIMESTAMPS:
+            - Must be continuous and consecutive in intervals of $intervalSeconds seconds (e.g., $sampleTimestamps ...).
+            - Start exactly at $startFormatted and proceed consecutively until $endFormatted.
+            """.trimIndent()
         }
 
         val characterContext = if (previousCharacterSheet.isNotEmpty()) {
@@ -911,10 +953,12 @@ class GeminiApiClient(
             """.trimIndent()
         }
 
-        val transcriptLanguageInstruction = if (language == NarrationLanguage.INDONESIAN) {
-            "Write the transcript in natural Bahasa Indonesia; translate it if the audio is in another language."
+        val targetLanguage = if (language == NarrationLanguage.INDONESIAN) "Indonesian" else "American English"
+
+        val translationInstruction = if (language == NarrationLanguage.INDONESIAN) {
+            "Translate faithfully into Indonesian: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in Indonesian even if the audio is in another language. Use natural and standard Indonesian, not stiff machine translation."
         } else {
-            "Write the transcript in natural American English; translate it if the audio is in another language."
+            "Translate faithfully into American English: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in American English even if the audio is in another language."
         }
 
         val timelineItemSchema = when (mode) {
@@ -923,7 +967,7 @@ class GeminiApiClient(
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
                   "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
-                  "dialogue": "Transcribe the spoken lines of characters heard in this time window, as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. Transcribe faithfully and do not invent lines. $transcriptLanguageInstruction"
+                  "dialogue": "Spoken lines of characters heard in this time window, formatted as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. $translationInstruction"
                 }
             """.trimIndent()
             NarrationMode.NARASI_ASLI -> """
@@ -931,7 +975,7 @@ class GeminiApiClient(
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
                   "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
-                  "originalNarration": "Transcribe only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. Transcribe faithfully and do not invent. $transcriptLanguageInstruction"
+                  "originalNarration": "Only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. $translationInstruction"
                 }
             """.trimIndent()
             NarrationMode.REKAP_VOICEOVER -> """
@@ -943,21 +987,38 @@ class GeminiApiClient(
             """.trimIndent()
         }
 
+        val languageBlock = if (mode == NarrationMode.REKAP_VOICEOVER) {
+            """
+            LANGUAGE:
+            - ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English.
+            """.trimIndent()
+        } else {
+            """
+            LANGUAGE (STRICT):
+            - The output language is $targetLanguage. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.
+            - The audio in the video may be in a different language than $targetLanguage. You MUST translate everything you hear into $targetLanguage. Never copy the original spoken language.
+            - Only proper nouns (character names, place names, technique names) stay unchanged.
+            """.trimIndent()
+        }
+
+        val finalCheckReminder = if (mode != NarrationMode.REKAP_VOICEOVER) {
+            "Final check: every 'dialogue' and 'originalNarration' value must be written in $targetLanguage.\n"
+        } else {
+            ""
+        }
+
         return """
             You are an expert anime visual director and storyboard analyst.
             Analyze the provided video segment between $startFormatted and $endFormatted.
             
-            TIMESTAMPS:
-            - Must be continuous and consecutive in intervals of $intervalSeconds seconds (e.g., $sampleTimestamps ...).
-            - Start exactly at $startFormatted and proceed consecutively until $endFormatted.
+            $timestampsBlock
             
-            LANGUAGE:
-            - ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English, EXCEPT the dialogue and originalNarration fields, which follow the language stated in their own instructions.
+            $languageBlock
             
             $characterContext
             
             OUTPUT JSON FORMAT:
-            Return ONLY a valid JSON object with exactly this schema:
+            ${finalCheckReminder}Return ONLY a valid JSON object with exactly this schema:
             {
               "segmentSummary": "A concise, fluid 2-3 sentence story summary of what happened in this 3-minute segment in natural American English.",
               "characterSheet": [
