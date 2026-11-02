@@ -65,12 +65,13 @@ import com.example.data.model.NarrationMode
 import com.example.data.model.TimelineItem
 
 object ExportFormatters {
-    fun formatFullExport(result: AnimeAnalysisResult, narrationModeName: String = ""): String {
+    fun formatFullExport(result: AnimeAnalysisResult, narrationModeName: String = "", languageName: String = ""): String {
         val modeLabel = narrationModeName.ifBlank {
             result.narrationMode.ifBlank {
                 NarrationMode.DEFAULT.displayName
             }
         }
+        val langLabel = languageName.ifBlank { "" }
         return buildString {
             appendLine("==================================================")
             appendLine("       HASIL REKAPIN & PROMPT GENERATOR ANIME     ")
@@ -82,7 +83,14 @@ object ExportFormatters {
             appendLine("Total Segmen       : ${result.totalSegments}")
             val intervalLabel = if (result.intervalSeconds == 0) "Per Adegan" else "${result.intervalSeconds} detik"
             appendLine("Interval Prompt    : $intervalLabel")
+            if (result.intervalSeconds == 0) {
+                val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration} detik"
+                appendLine("Batas Durasi Adegan: $maxDurLabel")
+            }
             appendLine("Mode Narasi        : $modeLabel")
+            if (langLabel.isNotBlank()) {
+                appendLine("Bahasa             : $langLabel")
+            }
             appendLine("Total Karakter     : ${result.characterSheet.size}")
             appendLine("Total Prompt Adegan: ${result.timeline.size}")
             appendLine("==================================================")
@@ -150,11 +158,15 @@ object ExportFormatters {
         }.trimEnd()
     }
 
-    fun formatTimeline(timeline: List<TimelineItem>, intervalSeconds: Int): String {
+    fun formatTimeline(timeline: List<TimelineItem>, intervalSeconds: Int, maxSceneDuration: Int = 5): String {
         if (timeline.isEmpty()) return "Timeline kosong."
         return buildString {
             val titleLabel = if (intervalSeconds == 0) "Per Adegan" else "Interval $intervalSeconds Detik"
             appendLine("=== TIMELINE VISUAL PROMPT ($titleLabel) ===")
+            if (intervalSeconds == 0) {
+                val maxDurLabel = if (maxSceneDuration == 0) "Tanpa batas" else "$maxSceneDuration Detik"
+                appendLine("Batas Durasi Adegan: $maxDurLabel")
+            }
             timeline.forEachIndexed { index, item ->
                 appendLine("[${item.timestamp}] Adegan #${index + 1}: ${item.sceneDescription}")
                 appendLine("Visual Prompt: ${item.visualPrompt}")
@@ -392,7 +404,8 @@ fun ResultView(
     result: AnimeAnalysisResult,
     modifier: Modifier = Modifier,
     styleName: String = "Anime 2D standar",
-    narrationModeName: String = ""
+    narrationModeName: String = "",
+    languageName: String = ""
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -424,7 +437,7 @@ fun ResultView(
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val exportText = ExportFormatters.formatFullExport(result, effectiveModeName)
+                val exportText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName)
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(exportText.toByteArray(Charsets.UTF_8))
                     outputStream.flush()
@@ -460,7 +473,7 @@ fun ResultView(
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
-        // Info Header: Interval Prompt & Mode Narasi
+        // Info Header: Interval Prompt, Mode Narasi & Bahasa
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
@@ -490,7 +503,10 @@ fun ResultView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        val intervalDisplay = if (result.intervalSeconds == 0) "Per Adegan" else "${result.intervalSeconds} detik"
+                        val intervalDisplay = if (result.intervalSeconds == 0) {
+                            val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration}s"
+                            "Per Adegan ($maxDurLabel)"
+                        } else "${result.intervalSeconds} detik"
                         Text(
                             text = "Interval Prompt: $intervalDisplay",
                             fontSize = 11.sp,
@@ -503,6 +519,14 @@ fun ResultView(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        if (languageName.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Bahasa: $languageName",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Text(
                         text = "${result.totalSegments} Segmen • ${result.durationFormatted}",
@@ -522,7 +546,7 @@ fun ResultView(
         ) {
             Button(
                 onClick = {
-                    val fullText = ExportFormatters.formatFullExport(result, effectiveModeName)
+                    val fullText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName)
                     clipboard.setText(AnnotatedString(fullText))
                     notify("Tersalin")
                 },
@@ -666,9 +690,10 @@ fun ResultView(
             currentTabTitle.startsWith("c. Timeline") -> TimelineSection(
                 timeline = result.timeline,
                 intervalSeconds = result.intervalSeconds,
+                maxSceneDuration = result.maxSceneDuration,
                 styleName = styleName,
                 onCopyTimeline = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds, result.maxSceneDuration)))
                     notify("Tersalin")
                 },
                 onCopyAllVisualPrompts = {
@@ -705,7 +730,7 @@ fun ResultView(
                     notify("Tersalin")
                 },
                 onCopyTimeline = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)))
+                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds, result.maxSceneDuration)))
                     notify("Tersalin")
                 },
                 onCopyAllVisualPrompts = {
@@ -803,7 +828,8 @@ private fun AllResultsSection(
         item {
             Spacer(modifier = Modifier.height(8.dp))
             val timelineSubtitle = if (result.intervalSeconds == 0) {
-                "Mode Per Adegan dengan $styleName prompt"
+                val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration}s"
+                "Mode Per Adegan (Batas: $maxDurLabel) dengan $styleName prompt"
             } else {
                 "Interval ${result.intervalSeconds} detik dengan $styleName prompt"
             }
@@ -932,6 +958,7 @@ private fun CharacterSheetSection(
 private fun TimelineSection(
     timeline: List<TimelineItem>,
     intervalSeconds: Int,
+    maxSceneDuration: Int = 5,
     styleName: String = "Anime 2D standar",
     onCopyTimeline: () -> Unit,
     onCopyAllVisualPrompts: () -> Unit,
@@ -943,7 +970,8 @@ private fun TimelineSection(
     ) {
         item {
             val timelineSubtitle = if (intervalSeconds == 0) {
-                "Mode Per Adegan, prompt $styleName"
+                val maxDurLabel = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
+                "Mode Per Adegan (Batas: $maxDurLabel), prompt $styleName"
             } else {
                 "Interval $intervalSeconds detik, prompt $styleName"
             }

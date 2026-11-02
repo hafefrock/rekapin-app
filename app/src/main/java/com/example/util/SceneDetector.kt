@@ -35,9 +35,14 @@ object SceneDetector {
 
     fun formatTimeSeconds(totalSec: Long): String {
         val safeSec = totalSec.coerceAtLeast(0L)
-        val m = safeSec / 60
+        val h = safeSec / 3600
+        val m = (safeSec % 3600) / 60
         val s = safeSec % 60
-        return String.format(Locale.US, "%02d:%02d", m, s)
+        return if (h > 0) {
+            String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+        } else {
+            String.format(Locale.US, "%02d:%02d", m, s)
+        }
     }
 
     /**
@@ -55,8 +60,20 @@ object SceneDetector {
         val actualStartSec = startSec.coerceAtLeast(0L)
         val actualEndSec = endSec.coerceAtLeast(actualStartSec + 1L)
         val totalSpanSec = actualEndSec - actualStartSec
+        val startTimeMs = System.currentTimeMillis()
+        var processedFramesCount = 0
 
-        Log.i(TAG, "Memulai deteksi adegan rentang ${actualStartSec}s - ${actualEndSec}s (maksimal $maxSceneDurationSec s/adegan)")
+        // Sampling adaptif berdasarkan panjang rentang durasi:
+        // Sampai 10 menit (<= 600s) = 0.5 detik
+        // 10 sampai 30 menit (601s..1800s) = 1.0 detik
+        // Di atas 30 menit (> 1800s) = 2.0 detik
+        val stepSec = when {
+            totalSpanSec <= 600L -> 0.5
+            totalSpanSec <= 1800L -> 1.0
+            else -> 2.0
+        }
+
+        Log.i(TAG, "Memulai deteksi adegan rentang ${actualStartSec}s - ${actualEndSec}s (total ${totalSpanSec}s, step=$stepSec s, maksimal $maxSceneDurationSec s/adegan)")
         onProgress(0f, "Mempersiapkan deteksi adegan...")
 
         val retriever = MediaMetadataRetriever()
@@ -76,8 +93,6 @@ object SceneDetector {
         var hasPreviousFrame = false
 
         try {
-            // Sampling 2 frame per detik (tiap 500ms = 500_000 mikrodetik)
-            val stepSec = 0.5
             val totalSteps = ((totalSpanSec / stepSec).toInt()).coerceAtLeast(1)
             var currentStep = 0
 
@@ -107,6 +122,7 @@ object SceneDetector {
                 }
 
                 if (bitmap != null) {
+                    processedFramesCount++
                     try {
                         bitmap.getPixels(pixelBuffer, 0, FRAME_WIDTH, 0, 0, FRAME_WIDTH, FRAME_HEIGHT)
                     } finally {
@@ -184,7 +200,8 @@ object SceneDetector {
             maxDuration = maxSceneDurationSec
         )
 
-        Log.i(TAG, "Hasil akhir rentang adegan: ${finalSpans.size} adegan")
+        val totalTimeMs = System.currentTimeMillis() - startTimeMs
+        Log.i(TAG, "Deteksi adegan selesai dalam ${totalTimeMs}ms: $processedFramesCount frame diproses, ${finalSpans.size} adegan dihasilkan")
         finalSpans
     }
 
@@ -192,7 +209,7 @@ object SceneDetector {
      * Membangun daftar rentang adegan lengkap (SceneTimeSpan) dari titik potong terdeteksi
      * dengan pemecahan adegan panjang berdasarkan batas maksimum durasi.
      */
-    private fun buildFinalSpans(
+    fun buildFinalSpans(
         rawCutPoints: List<Long>,
         startSec: Long,
         endSec: Long,
@@ -200,23 +217,36 @@ object SceneDetector {
     ): List<SceneTimeSpan> {
         val cuts = (listOf(startSec) + rawCutPoints + listOf(endSec)).distinct().sorted()
         val result = mutableListOf<SceneTimeSpan>()
-        val maxDurLong = maxDuration.toLong().coerceAtLeast(2L)
 
-        for (i in 0 until cuts.size - 1) {
-            var segStart = cuts[i]
-            val segEnd = cuts[i + 1]
-
-            while (segEnd - segStart > maxDurLong) {
-                val next = segStart + maxDurLong
-                // Jika sisa adegan terlalu pendek (< 1 detik), gabungkan ke adegan terakhir
-                if (segEnd - next < 1L) {
-                    break
+        if (maxDuration <= 0) {
+            // a. buildFinalSpans: jika maxDuration == 0, jangan pecah adegan panjang sama sekali.
+            // Satu rentang di antara dua titik potong tetap satu rentang.
+            for (i in 0 until cuts.size - 1) {
+                val segStart = cuts[i]
+                val segEnd = cuts[i + 1]
+                if (segStart < segEnd) {
+                    result.add(SceneTimeSpan(startSec = segStart, endSec = segEnd))
                 }
-                result.add(SceneTimeSpan(startSec = segStart, endSec = next))
-                segStart = next
             }
-            if (segStart < segEnd) {
-                result.add(SceneTimeSpan(startSec = segStart, endSec = segEnd))
+        } else {
+            val maxDurLong = maxDuration.toLong().coerceAtLeast(2L)
+
+            for (i in 0 until cuts.size - 1) {
+                var segStart = cuts[i]
+                val segEnd = cuts[i + 1]
+
+                while (segEnd - segStart > maxDurLong) {
+                    val next = segStart + maxDurLong
+                    // Jika sisa adegan terlalu pendek (< 1 detik), gabungkan ke adegan terakhir
+                    if (segEnd - next < 1L) {
+                        break
+                    }
+                    result.add(SceneTimeSpan(startSec = segStart, endSec = next))
+                    segStart = next
+                }
+                if (segStart < segEnd) {
+                    result.add(SceneTimeSpan(startSec = segStart, endSec = segEnd))
+                }
             }
         }
         return if (result.isEmpty()) {
@@ -226,9 +256,10 @@ object SceneDetector {
         }
     }
 
-    private fun splitSpansFallback(startSec: Long, endSec: Long, maxDuration: Int): List<SceneTimeSpan> {
+    internal fun splitSpansFallback(startSec: Long, endSec: Long, maxDuration: Int): List<SceneTimeSpan> {
         val result = mutableListOf<SceneTimeSpan>()
-        val maxDurLong = maxDuration.toLong().coerceAtLeast(2L)
+        val effectiveMax = if (maxDuration <= 0) 10 else maxDuration
+        val maxDurLong = effectiveMax.toLong().coerceAtLeast(2L)
         var curr = startSec
         while (curr < endSec) {
             val next = minOf(curr + maxDurLong, endSec)

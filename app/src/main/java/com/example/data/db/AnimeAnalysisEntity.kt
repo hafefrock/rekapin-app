@@ -52,7 +52,7 @@ data class AnimeAnalysisEntity(
             return String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
 
-    fun toAnimeAnalysisResult(): AnimeAnalysisResult {
+    fun toAnimeAnalysisResult(maxSceneDuration: Int = 5): AnimeAnalysisResult {
         return AnimeAnalysisResult(
             narration = narration,
             characterSheet = AnalysisJsonAdapter.jsonToCharacterSheet(characterSheetJson),
@@ -65,7 +65,8 @@ data class AnimeAnalysisEntity(
                 "Segmen terakhir dilewati"
             } else "",
             segmentModels = AnalysisJsonAdapter.jsonToSummaries(segmentModelsJson),
-            segmentSummaries = AnalysisJsonAdapter.jsonToSummaries(segmentSummariesJson)
+            segmentSummaries = AnalysisJsonAdapter.jsonToSummaries(segmentSummariesJson),
+            maxSceneDuration = maxSceneDuration
         )
     }
 }

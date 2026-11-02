@@ -5,7 +5,8 @@ enum class NarrationLanguage(
     val displayName: String
 ) {
     ENGLISH_USA("en_US", "English (USA)"),
-    INDONESIAN("id", "Bahasa Indonesia");
+    INDONESIAN("id", "Bahasa Indonesia"),
+    ORIGINAL("original", "Bahasa Asli");
 
     companion object {
         val DEFAULT = ENGLISH_USA

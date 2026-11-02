@@ -24,7 +24,8 @@ data class AnimeAnalysisResult(
     val note: String = "",
     val segmentModels: List<String> = emptyList(),
     val segmentSummaries: List<String> = emptyList(),
-    val narrationMode: String = ""
+    val narrationMode: String = "",
+    val maxSceneDuration: Int = 5
 )
 
 data class SegmentAnalysisOutput(

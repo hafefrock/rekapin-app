@@ -55,6 +55,13 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.ceil
 
+data class SceneCacheKey(
+    val videoUri: String,
+    val startSec: Long,
+    val endSec: Long,
+    val maxSceneDurationSec: Int
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
@@ -108,8 +115,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _detectedSceneCount = MutableStateFlow<Int?>(null)
     val detectedSceneCount: StateFlow<Int?> = _detectedSceneCount.asStateFlow()
 
-    // Cache rentang adegan di memori selama sesi
+    // Cache rentang adegan di memori selama sesi beserta kuncinya
     private var cachedSceneSpans: List<SceneTimeSpan>? = null
+    private var cachedSceneKey: SceneCacheKey? = null
 
     // Pilihan interval visual prompt: 3 detik atau 5 detik (default 5 detik)
     private val _promptIntervalSeconds = MutableStateFlow(5)
@@ -239,6 +247,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return getStyleForAnalysis(analysisId).name
     }
 
+    fun getMaxDurationForAnalysis(analysisId: Long): Int {
+        return promptCutModeStorage.getMaxDurationForAnalysis(analysisId)
+    }
+
     // Layar Riwayat
     private val _isHistoryOpen = MutableStateFlow(false)
     val isHistoryOpen: StateFlow<Boolean> = _isHistoryOpen.asStateFlow()
@@ -273,6 +285,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _analysisRangeEndSec.value = safeEnd
         Log.i(TAG, "Rentang analisis diatur: ${SegmentCalculator.formatTimeSeconds(safeStart)} - ${SegmentCalculator.formatTimeSeconds(safeEnd)} dari ${SegmentCalculator.formatTimeSeconds(totalSeconds)}")
         cachedSceneSpans = null
+        cachedSceneKey = null
         _detectedSceneCount.value = null
         if (_promptCutMode.value == PromptCutMode.PER_SCENE) {
             triggerSceneDetectionIfNeeded()
@@ -312,6 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     maxSceneDurationSec = maxDur
                 )
                 cachedSceneSpans = detected
+                cachedSceneKey = SceneCacheKey(video.uri.toString(), safeStart, safeEnd, maxDur)
                 _detectedSceneCount.value = detected.size
                 Log.d(TAG, "Pre-scan adegan selesai: ${detected.size} adegan")
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -334,12 +348,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setMaxSceneDuration(seconds: Int) {
-        if (seconds == 3 || seconds == 5 || seconds == 10) {
+        if (seconds == 0 || seconds == 3 || seconds == 5 || seconds == 10) {
             _maxSceneDurationSeconds.value = seconds
             promptCutModeStorage.setMaxSceneDuration(seconds)
             cachedSceneSpans = null
+            cachedSceneKey = null
             _detectedSceneCount.value = null
-            Log.i(TAG, "Batas maksimum durasi adegan diubah ke: $seconds detik")
+            Log.i(TAG, "Batas maksimum durasi adegan diubah ke: ${if (seconds == 0) "Tanpa batas" else "$seconds detik"}")
             if (_promptCutMode.value == PromptCutMode.PER_SCENE) {
                 triggerSceneDetectionIfNeeded()
             }
@@ -640,6 +655,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _selectedSeriesSourceId.value = null
                 _analysisState.value = AnalysisState.Idle
                 cachedSceneSpans = null
+                cachedSceneKey = null
                 _detectedSceneCount.value = null
                 updatePlanSummary()
                 if (_promptCutMode.value == PromptCutMode.PER_SCENE) {
@@ -705,6 +721,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedSeriesSourceId.value = null
         activeAnalysisId = null
         cachedSceneSpans = null
+        cachedSceneKey = null
         _detectedSceneCount.value = null
         _analysisState.value = AnalysisState.Idle
         updatePlanSummary()
@@ -834,15 +851,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (video == null || video.uri != parsedUri) {
                         video = withContext(Dispatchers.IO) { loadVideoMetadata(parsedUri) }
                         _selectedVideo.value = video
-                        if (existingEntity.intervalSeconds == 0) {
-                            _promptCutMode.value = PromptCutMode.PER_SCENE
-                            promptCutModeStorage.setMode(PromptCutMode.PER_SCENE)
-                            _maxSceneDurationSeconds.value = promptCutModeStorage.getMaxDurationForAnalysis(existingEntity.id)
-                        } else {
-                            _promptCutMode.value = PromptCutMode.FIXED_INTERVAL
-                            promptCutModeStorage.setMode(PromptCutMode.FIXED_INTERVAL)
-                            _promptIntervalSeconds.value = existingEntity.intervalSeconds
-                        }
+                    }
+                    if (existingEntity.intervalSeconds == 0) {
+                        _promptCutMode.value = PromptCutMode.PER_SCENE
+                        promptCutModeStorage.setMode(PromptCutMode.PER_SCENE)
+                        _maxSceneDurationSeconds.value = promptCutModeStorage.getMaxDurationForAnalysis(existingEntity.id)
+                    } else {
+                        _promptCutMode.value = PromptCutMode.FIXED_INTERVAL
+                        promptCutModeStorage.setMode(PromptCutMode.FIXED_INTERVAL)
+                        _promptIntervalSeconds.value = existingEntity.intervalSeconds
                     }
                 }
 
@@ -1171,36 +1188,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "Memulai analisis dengan model '$activeModel' (auto-switch: $isAutoSwitch, daftar: $modelList)")
 
                 // Deteksi adegan video sekali untuk seluruh rentang jika mode Per Adegan
-                if (activeCutMode == PromptCutMode.PER_SCENE && cachedSceneSpans == null) {
-                    currentStage = "Mendeteksi Adegan Video"
-                    _analysisState.value = AnalysisState.Preparing("Mendeteksi adegan video...")
-                    AnalysisForegroundService.updateStatus(
-                        context = context,
-                        title = "Mendeteksi Adegan Video",
-                        message = "Mendeteksi transisi adegan visual otomatis...",
-                        model = activeModel
-                    )
+                if (activeCutMode == PromptCutMode.PER_SCENE) {
                     val safeStart = segmentSpans.firstOrNull()?.startSec ?: 0L
                     val safeEnd = segmentSpans.lastOrNull()?.endSec ?: totalSeconds
-                    val detected = SceneDetector.detectSceneCuts(
-                        context = context,
-                        videoUri = video.uri,
+                    val requiredKey = SceneCacheKey(
+                        videoUri = video.uri.toString(),
                         startSec = safeStart,
                         endSec = safeEnd,
-                        maxSceneDurationSec = activeMaxSceneDur,
-                        onProgress = { _, msg ->
-                            _analysisState.value = AnalysisState.Preparing(msg)
-                            AnalysisForegroundService.updateStatus(
-                                context = context,
-                                title = "Mendeteksi Adegan Video",
-                                message = msg,
-                                model = activeModel
-                            )
-                        }
+                        maxSceneDurationSec = activeMaxSceneDur
                     )
-                    cachedSceneSpans = detected
-                    _detectedSceneCount.value = detected.size
-                    Log.i(TAG, "Deteksi adegan lokal selesai: ${detected.size} adegan terdeteksi")
+
+                    // Jika preScanJob masih aktif, tunggu job selesai (join) dan gunakan hasilnya
+                    val activePreScan = preScanJob
+                    if (activePreScan != null && activePreScan.isActive) {
+                        currentStage = "Mendeteksi Adegan Video"
+                        _analysisState.value = AnalysisState.Preparing("Mendeteksi adegan video...")
+                        AnalysisForegroundService.updateStatus(
+                            context = context,
+                            title = "Mendeteksi Adegan Video",
+                            message = "Mendeteksi transisi adegan visual otomatis...",
+                            model = activeModel
+                        )
+                        Log.i(TAG, "Menunggu preScanJob latar belakang selesai (join)...")
+                        activePreScan.join()
+                    }
+
+                    // Pakai cache hanya jika kuncinya cocok dengan analisis yang akan berjalan
+                    if (cachedSceneSpans != null && cachedSceneKey != requiredKey) {
+                        Log.i(TAG, "Cache adegan tidak cocok dengan analisis yang akan berjalan. Membuang cache lama...")
+                        cachedSceneSpans = null
+                        cachedSceneKey = null
+                        _detectedSceneCount.value = null
+                    }
+
+                    if (cachedSceneSpans == null || cachedSceneKey != requiredKey) {
+                        currentStage = "Mendeteksi Adegan Video"
+                        _analysisState.value = AnalysisState.Preparing("Mendeteksi adegan video...")
+                        AnalysisForegroundService.updateStatus(
+                            context = context,
+                            title = "Mendeteksi Adegan Video",
+                            message = "Mendeteksi transisi adegan visual otomatis...",
+                            model = activeModel
+                        )
+                        val detected = SceneDetector.detectSceneCuts(
+                            context = context,
+                            videoUri = video.uri,
+                            startSec = safeStart,
+                            endSec = safeEnd,
+                            maxSceneDurationSec = activeMaxSceneDur,
+                            onProgress = { _, msg ->
+                                _analysisState.value = AnalysisState.Preparing(msg)
+                                AnalysisForegroundService.updateStatus(
+                                    context = context,
+                                    title = "Mendeteksi Adegan Video",
+                                    message = msg,
+                                    model = activeModel
+                                )
+                            }
+                        )
+                        cachedSceneSpans = detected
+                        cachedSceneKey = requiredKey
+                        _detectedSceneCount.value = detected.size
+                        Log.i(TAG, "Deteksi adegan lokal selesai: ${detected.size} adegan terdeteksi")
+                    }
                 }
 
                 // Loop Analisis per segmen (mulai dari startIndex - segmen tersimpan TIDAK dianalisis ulang)
@@ -1212,15 +1262,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentStage = "Analisis Segmen ${i + 1} dari $totalSegments ($timeRange)"
 
                     val exactScenes = if (activeCutMode == PromptCutMode.PER_SCENE) {
-                        val spans = cachedSceneSpans ?: SceneDetector.detectSceneCuts(
-                            context = context,
-                            videoUri = video.uri,
-                            startSec = startSec,
-                            endSec = endSec,
+                        val safeStart = segmentSpans.firstOrNull()?.startSec ?: 0L
+                        val safeEnd = segmentSpans.lastOrNull()?.endSec ?: totalSeconds
+                        val requiredKey = SceneCacheKey(
+                            videoUri = video.uri.toString(),
+                            startSec = safeStart,
+                            endSec = safeEnd,
                             maxSceneDurationSec = activeMaxSceneDur
-                        ).also {
-                            cachedSceneSpans = it
-                            _detectedSceneCount.value = it.size
+                        )
+                        val spans = if (cachedSceneSpans != null && cachedSceneKey == requiredKey) {
+                            cachedSceneSpans!!
+                        } else {
+                            SceneDetector.detectSceneCuts(
+                                context = context,
+                                videoUri = video.uri,
+                                startSec = safeStart,
+                                endSec = safeEnd,
+                                maxSceneDurationSec = activeMaxSceneDur
+                            ).also {
+                                cachedSceneSpans = it
+                                cachedSceneKey = requiredKey
+                                _detectedSceneCount.value = it.size
+                            }
                         }
                         SceneDetector.getScenesForSegment(spans, startSec, endSec)
                     } else {
@@ -1429,7 +1492,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     videoName = video.displayName,
                     segmentModels = segmentModels,
                     segmentSummaries = segmentSummaries,
-                    narrationMode = activeMode.displayName
+                    narrationMode = activeMode.displayName,
+                    maxSceneDuration = activeMaxSceneDur
                 )
 
                 Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
@@ -1774,7 +1838,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     note = "Segmen terakhir dilewati",
                     segmentModels = segmentModels,
                     segmentSummaries = summaries,
-                    narrationMode = analysisMode.displayName
+                    narrationMode = analysisMode.displayName,
+                    maxSceneDuration = promptCutModeStorage.getMaxDurationForAnalysis(targetId)
                 )
                 val savedStyle = visualStyleStorage.getStyleForAnalysis(targetId) ?: visualStyleStorage.getSelectedStyle()
                 _analysisState.value = AnalysisState.Success(finalResult, styleName = savedStyle.name)

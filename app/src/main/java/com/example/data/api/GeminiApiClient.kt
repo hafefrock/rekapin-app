@@ -955,10 +955,16 @@ $listFormatted
 
         val targetLanguage = if (language == NarrationLanguage.INDONESIAN) "Indonesian" else "American English"
 
-        val translationInstruction = if (language == NarrationLanguage.INDONESIAN) {
-            "Translate faithfully into Indonesian: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in Indonesian even if the audio is in another language. Use natural and standard Indonesian, not stiff machine translation."
-        } else {
-            "Translate faithfully into American English: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in American English even if the audio is in another language."
+        val transcriptInstruction = when (language) {
+            NarrationLanguage.ORIGINAL -> {
+                "Transcribe exactly what is spoken, in the ORIGINAL spoken language of the audio. Do NOT translate. Keep it faithful and do not invent lines. If the language is unclear, use the language that is most clearly heard."
+            }
+            NarrationLanguage.INDONESIAN -> {
+                "Translate faithfully into Indonesian: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in Indonesian even if the audio is in another language. Use natural and standard Indonesian, not stiff machine translation."
+            }
+            NarrationLanguage.ENGLISH_USA -> {
+                "Translate faithfully into American English: keep the meaning, tone, and speaker, and do not invent lines. The text MUST be in American English even if the audio is in another language."
+            }
         }
 
         val timelineItemSchema = when (mode) {
@@ -967,7 +973,7 @@ $listFormatted
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
                   "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
-                  "dialogue": "Spoken lines of characters heard in this time window, formatted as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. $translationInstruction"
+                  "dialogue": "Spoken lines of characters heard in this time window, formatted as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. $transcriptInstruction"
                 }
             """.trimIndent()
             NarrationMode.NARASI_ASLI -> """
@@ -975,7 +981,7 @@ $listFormatted
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
                   "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
-                  "originalNarration": "Only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. $translationInstruction"
+                  "originalNarration": "Only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. $transcriptInstruction"
                 }
             """.trimIndent()
             NarrationMode.REKAP_VOICEOVER -> """
@@ -992,19 +998,26 @@ $listFormatted
             LANGUAGE:
             - ALL output text (summary, descriptions, visual prompts, and character sheet) MUST be written in natural American English.
             """.trimIndent()
+        } else if (language == NarrationLanguage.ORIGINAL) {
+            """
+            LANGUAGE (STRICT):
+            - Transcript fields ('dialogue' and 'originalNarration') MUST be written in the ORIGINAL spoken language of the audio. Do NOT translate them.
+            - ALL other fields ('segmentSummary', 'characterSheet', 'sceneDescription', and 'visualPrompt') MUST be written in natural American English.
+            """.trimIndent()
         } else {
             """
             LANGUAGE (STRICT):
-            - The output language is $targetLanguage. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.
+            - The output language is $targetLanguage. This applies to the transcript fields 'dialogue' and 'originalNarration'.
+            - ALL other fields ('segmentSummary', 'characterSheet', 'sceneDescription', and 'visualPrompt') MUST be written in natural American English.
             - The audio in the video may be in a different language than $targetLanguage. You MUST translate everything you hear into $targetLanguage. Never copy the original spoken language.
             - Only proper nouns (character names, place names, technique names) stay unchanged.
             """.trimIndent()
         }
 
-        val finalCheckReminder = if (mode != NarrationMode.REKAP_VOICEOVER) {
-            "Final check: every 'dialogue' and 'originalNarration' value must be written in $targetLanguage.\n"
-        } else {
-            ""
+        val finalCheckReminder = when {
+            mode == NarrationMode.REKAP_VOICEOVER -> ""
+            language == NarrationLanguage.ORIGINAL -> "Final check: 'dialogue' and 'originalNarration' must be in the original spoken language, never translated.\n"
+            else -> "Final check: every 'dialogue' and 'originalNarration' value must be written in $targetLanguage.\n"
         }
 
         return """

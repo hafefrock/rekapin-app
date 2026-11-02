@@ -75,7 +75,8 @@ fun HistoryScreen(
     onDeleteAnalysis: (Long) -> Unit,
     onResumeAnalysis: (Long) -> Unit,
     onFinishWithoutCurrentSegment: ((Long) -> Unit)? = null,
-    onMergeNarrationsWithAi: (suspend (parts: List<Pair<String, String>>, onStatus: (String) -> Unit) -> String)? = null
+    onMergeNarrationsWithAi: (suspend (parts: List<Pair<String, String>>, onStatus: (String) -> Unit) -> String)? = null,
+    getMaxDurationForAnalysis: ((Long) -> Int)? = null
 ) {
     // Mode pilih banyak
     var isSelectMode by remember { mutableStateOf(false) }
@@ -274,7 +275,8 @@ fun HistoryScreen(
                                 }
                             },
                             onDelete = { itemToDelete = entity },
-                            onResume = { onResumeAnalysis(entity.id) }
+                            onResume = { onResumeAnalysis(entity.id) },
+                            maxSceneDuration = getMaxDurationForAnalysis?.invoke(entity.id) ?: 5
                         )
                     }
                 }
@@ -351,7 +353,8 @@ private fun HistoryItemCard(
     onLongClick: () -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit,
-    onResume: () -> Unit
+    onResume: () -> Unit,
+    maxSceneDuration: Int = 5
 ) {
     val isEnabled = !isSelectMode || entity.isCompleted
     val alpha = if (isSelectMode && !entity.isCompleted) 0.38f else 1f
@@ -485,7 +488,10 @@ private fun HistoryItemCard(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    val intervalText = if (entity.intervalSeconds == 0) "Per Adegan" else "Interval ${entity.intervalSeconds}s"
+                    val intervalText = if (entity.intervalSeconds == 0) {
+                        val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
+                        "Per Adegan ($maxDurText)"
+                    } else "Interval ${entity.intervalSeconds}s"
                     Text(
                         text = intervalText,
                         fontSize = 11.sp,
@@ -530,6 +536,8 @@ fun HistoryDetailScreen(
     entity: AnimeAnalysisEntity,
     styleName: String = "Anime 2D standar",
     narrationModeName: String = "",
+    languageName: String = "",
+    maxSceneDuration: Int = 5,
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -618,11 +626,12 @@ fun HistoryDetailScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            val result = entity.toAnimeAnalysisResult()
+            val result = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration)
             ResultView(
                 result = result,
                 styleName = styleName,
                 narrationModeName = narrationModeName,
+                languageName = languageName,
                 modifier = Modifier.fillMaxSize()
             )
         }

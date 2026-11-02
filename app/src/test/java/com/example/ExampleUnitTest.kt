@@ -911,7 +911,8 @@ class ExampleUnitTest {
         assertTrue(
             "Prompt Dialog Konten Indonesia harus memuat aturan LANGUAGE (STRICT) dengan Indonesian",
             promptDialogId.contains("LANGUAGE (STRICT):") &&
-                    promptDialogId.contains("The output language is Indonesian. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.") &&
+                    promptDialogId.contains("The output language is Indonesian. This applies to the transcript fields 'dialogue' and 'originalNarration'.") &&
+                    promptDialogId.contains("ALL other fields ('segmentSummary', 'characterSheet', 'sceneDescription', and 'visualPrompt') MUST be written in natural American English.") &&
                     promptDialogId.contains("You MUST translate everything you hear into Indonesian. Never copy the original spoken language.")
         )
         assertTrue(
@@ -935,7 +936,8 @@ class ExampleUnitTest {
         assertTrue(
             "Prompt Narasi Asli English USA harus memuat aturan LANGUAGE (STRICT) dengan American English",
             promptNarasiAsliEn.contains("LANGUAGE (STRICT):") &&
-                    promptNarasiAsliEn.contains("The output language is American English. This applies to EVERY text field, including 'dialogue' and 'originalNarration'.") &&
+                    promptNarasiAsliEn.contains("The output language is American English. This applies to the transcript fields 'dialogue' and 'originalNarration'.") &&
+                    promptNarasiAsliEn.contains("ALL other fields ('segmentSummary', 'characterSheet', 'sceneDescription', and 'visualPrompt') MUST be written in natural American English.") &&
                     promptNarasiAsliEn.contains("You MUST translate everything you hear into American English. Never copy the original spoken language.")
         )
         assertTrue(
@@ -964,6 +966,45 @@ class ExampleUnitTest {
             "Prompt Rekap Voiceover tidak boleh memuat Final check dialog/narasi",
             promptRekap.contains("Final check: every 'dialogue' and 'originalNarration' value must be written in")
         )
+
+        // 4. DIALOG_KONTEN dengan Bahasa Asli (ORIGINAL)
+        val promptDialogOriginal = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.DIALOG_KONTEN,
+            com.example.data.model.NarrationLanguage.ORIGINAL,
+            emptyList<String>()
+        ) as String
+
+        assertTrue(
+            "Prompt Dialog Konten Bahasa Asli harus memuat aturan LANGUAGE (STRICT) dua kelompok",
+            promptDialogOriginal.contains("Transcript fields ('dialogue' and 'originalNarration') MUST be written in the ORIGINAL spoken language of the audio. Do NOT translate them.") &&
+                    promptDialogOriginal.contains("ALL other fields ('segmentSummary', 'characterSheet', 'sceneDescription', and 'visualPrompt') MUST be written in natural American English.")
+        )
+        assertTrue(
+            "Prompt Bahasa Asli harus memuat 'Do NOT translate' dan 'ORIGINAL spoken language'",
+            promptDialogOriginal.contains("Do NOT translate") &&
+                    promptDialogOriginal.contains("ORIGINAL spoken language")
+        )
+        assertTrue(
+            "Field dialogue Bahasa Asli harus meminta transkrip persis apa adanya tanpa terjemahan",
+            promptDialogOriginal.contains("Transcribe exactly what is spoken, in the ORIGINAL spoken language of the audio. Do NOT translate. Keep it faithful and do not invent lines. If the language is unclear, use the language that is most clearly heard.")
+        )
+        assertTrue(
+            "Prompt Dialog Konten Bahasa Asli harus memuat pengingat Final check original spoken language",
+            promptDialogOriginal.contains("Final check: 'dialogue' and 'originalNarration' must be in the original spoken language, never translated.")
+        )
+    }
+
+    @Test
+    fun testNarrationLanguageOriginalEnum() {
+        assertEquals("original", com.example.data.model.NarrationLanguage.ORIGINAL.code)
+        assertEquals("Bahasa Asli", com.example.data.model.NarrationLanguage.ORIGINAL.displayName)
+        assertEquals(com.example.data.model.NarrationLanguage.ORIGINAL, com.example.data.model.NarrationLanguage.fromDisplayName("Bahasa Asli"))
+        assertEquals(com.example.data.model.NarrationLanguage.ORIGINAL, com.example.data.model.NarrationLanguage.fromDisplayName("original"))
+        assertEquals(com.example.data.model.NarrationLanguage.ENGLISH_USA, com.example.data.model.NarrationLanguage.fromDisplayName("English (USA)"))
+        assertEquals(com.example.data.model.NarrationLanguage.INDONESIAN, com.example.data.model.NarrationLanguage.fromDisplayName("Bahasa Indonesia"))
+        assertEquals(com.example.data.model.NarrationLanguage.DEFAULT, com.example.data.model.NarrationLanguage.fromDisplayName("invalid"))
     }
 
     @Test
@@ -1214,6 +1255,82 @@ class ExampleUnitTest {
 
         val timelineExport = com.example.ui.components.ExportFormatters.formatTimeline(result.timeline, result.intervalSeconds)
         assertTrue(timelineExport.contains("=== TIMELINE VISUAL PROMPT (Per Adegan) ==="))
+        org.junit.Assert.assertFalse(timelineExport.contains("0 Detik"))
+    }
+
+    @Test
+    fun testBuildFinalSpansMaxDuration() {
+        val startSec = 0L
+        val endSec = 20L
+        val rawCutPoints = emptyList<Long>() // satu adegan 20 detik tanpa titik potong di tengah
+
+        // 1. maxDuration = 0 (Tanpa batas -> adegan 20 detik tetap satu rentang)
+        val spansUnlimited = com.example.util.SceneDetector.buildFinalSpans(rawCutPoints, startSec, endSec, maxDuration = 0)
+        assertEquals(1, spansUnlimited.size)
+        assertEquals(0L, spansUnlimited[0].startSec)
+        assertEquals(20L, spansUnlimited[0].endSec)
+
+        // 2. maxDuration = 10 (adegan 20 detik menjadi dua rentang masing-masing 10 detik)
+        val spans10 = com.example.util.SceneDetector.buildFinalSpans(rawCutPoints, startSec, endSec, maxDuration = 10)
+        assertEquals(2, spans10.size)
+        assertEquals(com.example.util.SceneTimeSpan(0L, 10L), spans10[0])
+        assertEquals(com.example.util.SceneTimeSpan(10L, 20L), spans10[1])
+
+        // 3. maxDuration = 5 (hasil lama tidak berubah -> adegan 20 detik dipecah per 5 detik menjadi 4 rentang)
+        val spans5 = com.example.util.SceneDetector.buildFinalSpans(rawCutPoints, startSec, endSec, maxDuration = 5)
+        assertEquals(4, spans5.size)
+        assertEquals(com.example.util.SceneTimeSpan(0L, 5L), spans5[0])
+        assertEquals(com.example.util.SceneTimeSpan(5L, 10L), spans5[1])
+        assertEquals(com.example.util.SceneTimeSpan(10L, 15L), spans5[2])
+        assertEquals(com.example.util.SceneTimeSpan(15L, 20L), spans5[3])
+
+        // Fallback test saat deteksi gagal: maxDuration = 0 fallback ke 10 detik
+        val fallbackSpans = com.example.util.SceneDetector.splitSpansFallback(startSec, endSec, maxDuration = 0)
+        assertEquals(2, fallbackSpans.size)
+        assertEquals(com.example.util.SceneTimeSpan(0L, 10L), fallbackSpans[0])
+        assertEquals(com.example.util.SceneTimeSpan(10L, 20L), fallbackSpans[1])
+    }
+
+    @Test
+    fun testPromptCutModeStorageMaxSceneDurationZeroAndTen() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val storage = com.example.data.prefs.PromptCutModeStorage(context)
+
+        // Simpan 0 (Tanpa batas)
+        storage.setMaxSceneDuration(0)
+        assertEquals(0, storage.getMaxSceneDuration())
+
+        // Simpan per analisis (0 dan 10)
+        storage.saveModeForAnalysis(888L, com.example.data.model.PromptCutMode.PER_SCENE, maxDurationSec = 0)
+        assertEquals(0, storage.getMaxDurationForAnalysis(888L))
+
+        storage.saveModeForAnalysis(889L, com.example.data.model.PromptCutMode.PER_SCENE, maxDurationSec = 10)
+        assertEquals(10, storage.getMaxDurationForAnalysis(889L))
+    }
+
+    @Test
+    fun testExportFormattersTanpaBatasLabel() {
+        val resultUnlimited = com.example.data.model.AnimeAnalysisResult(
+            narration = "Recap text",
+            characterSheet = emptyList(),
+            timeline = listOf(
+                com.example.data.model.TimelineItem("00:00 - 00:20", "Long scene", "Visual prompt")
+            ),
+            totalSegments = 1,
+            durationFormatted = "00:20",
+            intervalSeconds = 0,
+            maxSceneDuration = 0
+        )
+        val fullExport = com.example.ui.components.ExportFormatters.formatFullExport(resultUnlimited)
+        assertTrue(fullExport.contains("Batas Durasi Adegan: Tanpa batas"))
+        org.junit.Assert.assertFalse(fullExport.contains("0 detik"))
+
+        val timelineExport = com.example.ui.components.ExportFormatters.formatTimeline(
+            resultUnlimited.timeline,
+            resultUnlimited.intervalSeconds,
+            resultUnlimited.maxSceneDuration
+        )
+        assertTrue(timelineExport.contains("Batas Durasi Adegan: Tanpa batas"))
         org.junit.Assert.assertFalse(timelineExport.contains("0 Detik"))
     }
 }

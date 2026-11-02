@@ -740,12 +740,14 @@ fun SettingsDialog(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    val isVoiceoverMode = (selectedNarrationMode == NarrationMode.REKAP_VOICEOVER)
+                    val isEffectiveEnglish = (selectedLanguage == NarrationLanguage.ENGLISH_USA) || (isVoiceoverMode && selectedLanguage == NarrationLanguage.ORIGINAL)
+
                     // Opsi 1: English (USA) (default)
-                    val isEnglish = (selectedLanguage == NarrationLanguage.ENGLISH_USA)
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isEnglish) {
+                            containerColor = if (isEffectiveEnglish) {
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                             } else {
                                 MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
@@ -754,8 +756,8 @@ fun SettingsDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(
-                                width = if (isEnglish) 1.5.dp else 1.dp,
-                                color = if (isEnglish) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                                width = if (isEffectiveEnglish) 1.5.dp else 1.dp,
+                                color = if (isEffectiveEnglish) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
                                 shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { onSelectLanguage(NarrationLanguage.ENGLISH_USA) }
@@ -768,7 +770,7 @@ fun SettingsDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = isEnglish,
+                                selected = isEffectiveEnglish,
                                 onClick = { onSelectLanguage(NarrationLanguage.ENGLISH_USA) },
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = MaterialTheme.colorScheme.primary
@@ -786,7 +788,7 @@ fun SettingsDialog(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "(default)",
+                                        text = if (isVoiceoverMode && selectedLanguage == NarrationLanguage.ORIGINAL) "(berlaku)" else "(default)",
                                         fontSize = 10.sp,
                                         color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Medium
@@ -853,6 +855,80 @@ fun SettingsDialog(
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Opsi 3: Bahasa Asli (hanya relevan untuk Dialog Konten & Narasi Asli)
+                    val isOriginalEnabled = !isVoiceoverMode
+                    val isOriginalSelected = (!isVoiceoverMode && selectedLanguage == NarrationLanguage.ORIGINAL)
+                    val originalAlpha = if (isOriginalEnabled) 1f else 0.45f
+
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isOriginalSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f * originalAlpha)
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = if (isOriginalSelected) 1.5.dp else 1.dp,
+                                color = if (isOriginalSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f * originalAlpha),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .then(
+                                if (isOriginalEnabled) {
+                                    Modifier.clickable { onSelectLanguage(NarrationLanguage.ORIGINAL) }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .testTag("card_language_original")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isOriginalSelected,
+                                onClick = if (isOriginalEnabled) { { onSelectLanguage(NarrationLanguage.ORIGINAL) } } else null,
+                                enabled = isOriginalEnabled,
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier.testTag("radio_lang_original")
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Bahasa Asli",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isOriginalEnabled) 1f else 0.6f)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Transkrip tetap dalam bahasa suara di video, tanpa terjemahan",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isOriginalEnabled) 1f else 0.6f)
+                                )
+                                if (!isOriginalEnabled) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Hanya untuk mode Dialog Konten / Narasi Asli",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     }

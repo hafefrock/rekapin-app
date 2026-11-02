@@ -232,6 +232,8 @@ fun HomeScreen(
             entity = historyEntity,
             styleName = viewModel.getStyleNameForAnalysis(historyEntity.id),
             narrationModeName = viewModel.getModeNameForAnalysis(historyEntity.id),
+            languageName = narrationLanguage.displayName,
+            maxSceneDuration = viewModel.getMaxDurationForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
                 requestNotificationAndStart {
@@ -261,6 +263,7 @@ fun HomeScreen(
                 }
                 viewModel.closeHistory()
             },
+            getMaxDurationForAnalysis = { viewModel.getMaxDurationForAnalysis(it) },
             onFinishWithoutCurrentSegment = { resumeId ->
                 viewModel.finishWithoutCurrentSegment(resumeId)
                 viewModel.closeHistory()
@@ -400,7 +403,10 @@ fun HomeScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
-                                val intervalLabel = if (state.result.intervalSeconds == 0) "Per Adegan" else "Interval ${state.result.intervalSeconds}s"
+                                val intervalLabel = if (state.result.intervalSeconds == 0) {
+                                    val maxDurText = if (state.result.maxSceneDuration == 0) "Tanpa batas" else "${state.result.maxSceneDuration}s"
+                                    "Per Adegan ($maxDurText)"
+                                } else "Interval ${state.result.intervalSeconds}s"
                                 Text(
                                     text = "${state.result.totalSegments} Segmen • $intervalLabel (Tersimpan di Riwayat)",
                                     fontSize = 12.sp,
@@ -431,6 +437,7 @@ fun HomeScreen(
                             result = state.result,
                             styleName = state.styleName,
                             narrationModeName = state.result.narrationMode.ifBlank { narrationMode.displayName },
+                            languageName = narrationLanguage.displayName,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -1678,7 +1685,46 @@ private fun IdleSetupContent(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Option 5 Detik Max
+                    // 1. Option 3 Detik
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onMaxSceneDurationChanged(3) }
+                            .background(
+                                if (maxSceneDurationSeconds == 3) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("interval_3s_option"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (maxSceneDurationSeconds == 3),
+                            onClick = { onMaxSceneDurationChanged(3) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "3 Detik",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Adegan yang lebih panjang dari 3 detik dipecah per 3 detik",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 2. Option 5 Detik (Bawaan)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1733,23 +1779,23 @@ private fun IdleSetupContent(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Option 3 Detik Max
+                    // 3. Option 10 Detik
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMaxSceneDurationChanged(3) }
+                            .clickable { onMaxSceneDurationChanged(10) }
                             .background(
-                                if (maxSceneDurationSeconds == 3) MaterialTheme.colorScheme.surfaceContainerHighest
+                                if (maxSceneDurationSeconds == 10) MaterialTheme.colorScheme.surfaceContainerHighest
                                 else MaterialTheme.colorScheme.surface
                             )
                             .padding(12.dp)
-                            .testTag("interval_3s_option"),
+                            .testTag("radio_max_scene_10"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = (maxSceneDurationSeconds == 3),
-                            onClick = { onMaxSceneDurationChanged(3) },
+                            selected = (maxSceneDurationSeconds == 10),
+                            onClick = { onMaxSceneDurationChanged(10) },
                             colors = RadioButtonDefaults.colors(
                                 selectedColor = MaterialTheme.colorScheme.primary
                             )
@@ -1757,13 +1803,52 @@ private fun IdleSetupContent(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "3 Detik",
+                                text = "10 Detik",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Adegan yang lebih panjang dari 3 detik dipecah per 3 detik",
+                                text = "Adegan yang lebih panjang dari 10 detik dipecah per 10 detik",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 4. Option Tanpa Batas (0)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onMaxSceneDurationChanged(0) }
+                            .background(
+                                if (maxSceneDurationSeconds == 0) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surface
+                            )
+                            .padding(12.dp)
+                            .testTag("radio_max_scene_unlimited"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (maxSceneDurationSeconds == 0),
+                            onClick = { onMaxSceneDurationChanged(0) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Tanpa batas",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Satu adegan = satu prompt, tidak dipecah lagi",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2412,6 +2497,28 @@ private fun IdleSetupContent(
                             )
                             Text(
                                 text = "±${segmentPlanSummary.estimatedScenesCount} adegan visual",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    if (promptCutMode == PromptCutMode.PER_SCENE) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Batas Durasi Adegan",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val maxDurLabel = if (maxSceneDurationSeconds == 0) "Tanpa batas" else "$maxSceneDurationSeconds detik"
+                            Text(
+                                text = maxDurLabel,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface
