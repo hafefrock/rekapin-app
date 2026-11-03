@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToLong
 import kotlin.math.sqrt
 
@@ -49,14 +50,19 @@ object SceneDetector {
      * Mendeteksi titik pergantian adegan lokal secara efisien (hemat memori untuk perangkat spesifikasi rendah).
      * Berjalan di Dispatchers.IO dan mendukung pembatalan coroutine secara responsif.
      */
-    suspend fun detectSceneCuts(
+    /**
+     * Mendeteksi titik potong adegan mentah (cut points dalam detik) dari video.
+     * Menggunakan OPTION_CLOSEST_SYNC untuk rentang > 5 menit, dan OPTION_CLOSEST untuk <= 5 menit.
+     * Mengabaikan keyframe yang sama pada OPTION_CLOSEST_SYNC untuk mencegah selisih palsu.
+     * Menghitung progres 0..1 dan estimasi sisa waktu setelah minimal 5% selesai.
+     */
+    suspend fun detectRawCutPoints(
         context: Context,
         videoUri: Uri,
         startSec: Long,
         endSec: Long,
-        maxSceneDurationSec: Int = 5,
         onProgress: (Float, String) -> Unit = { _, _ -> }
-    ): List<SceneTimeSpan> = withContext(Dispatchers.IO) {
+    ): List<Long>? = withContext(Dispatchers.IO) {
         val actualStartSec = startSec.coerceAtLeast(0L)
         val actualEndSec = endSec.coerceAtLeast(actualStartSec + 1L)
         val totalSpanSec = actualEndSec - actualStartSec
@@ -64,16 +70,25 @@ object SceneDetector {
         var processedFramesCount = 0
 
         // Sampling adaptif berdasarkan panjang rentang durasi:
-        // Sampai 10 menit (<= 600s) = 0.5 detik
-        // 10 sampai 30 menit (601s..1800s) = 1.0 detik
-        // Di atas 30 menit (> 1800s) = 2.0 detik
+        // Sampai 5 menit (<= 300s) = 0.5 detik
+        // 5 sampai 15 menit (301s..900s) = 1.0 detik
+        // 15 sampai 40 menit (901s..2400s) = 2.0 detik
+        // Di atas 40 menit (> 2400s) = 3.0 detik
         val stepSec = when {
-            totalSpanSec <= 600L -> 0.5
-            totalSpanSec <= 1800L -> 1.0
-            else -> 2.0
+            totalSpanSec <= 300L -> 0.5
+            totalSpanSec <= 900L -> 1.0
+            totalSpanSec <= 2400L -> 2.0
+            else -> 3.0
         }
 
-        Log.i(TAG, "Memulai deteksi adegan rentang ${actualStartSec}s - ${actualEndSec}s (total ${totalSpanSec}s, step=$stepSec s, maksimal $maxSceneDurationSec s/adegan)")
+        // Rentang > 5 menit menggunakan OPTION_CLOSEST_SYNC untuk kecepatan maksimal
+        val retrievalOption = if (totalSpanSec > 300L) {
+            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+        } else {
+            MediaMetadataRetriever.OPTION_CLOSEST
+        }
+
+        Log.i(TAG, "Memulai deteksi titik potong rentang ${actualStartSec}s - ${actualEndSec}s (total ${totalSpanSec}s, step=$stepSec s, mode=${if (totalSpanSec > 300L) "CLOSEST_SYNC" else "CLOSEST"})")
         onProgress(0f, "Mempersiapkan deteksi adegan...")
 
         val retriever = MediaMetadataRetriever()
@@ -83,8 +98,7 @@ object SceneDetector {
             retriever.setDataSource(context, videoUri)
         } catch (e: Exception) {
             Log.e(TAG, "Gagal menginisialisasi MediaMetadataRetriever: ${e.message}")
-            // Fallback aman: jika gagal membaca frame video, bagi berdasarkan batas maksimum durasi
-            return@withContext splitSpansFallback(actualStartSec, actualEndSec, maxSceneDurationSec)
+            return@withContext null
         }
 
         val pixelBuffer = IntArray(TOTAL_PIXELS)
@@ -105,12 +119,12 @@ object SceneDetector {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                         retriever.getScaledFrameAtTime(
                             timeUs,
-                            MediaMetadataRetriever.OPTION_CLOSEST,
+                            retrievalOption,
                             FRAME_WIDTH,
                             FRAME_HEIGHT
                         )
                     } else {
-                        val fullBm = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                        val fullBm = retriever.getFrameAtTime(timeUs, retrievalOption)
                         if (fullBm != null) {
                             val scaled = Bitmap.createScaledBitmap(fullBm, FRAME_WIDTH, FRAME_HEIGHT, true)
                             if (scaled != fullBm) fullBm.recycle()
@@ -139,25 +153,47 @@ object SceneDetector {
                     }
 
                     if (hasPreviousFrame) {
-                        var absSum = 0L
-                        for (i in 0 until TOTAL_PIXELS) {
-                            val v1 = currGray[i].toInt() and 0xFF
-                            val v2 = prevGray[i].toInt() and 0xFF
-                            absSum += abs(v1 - v2)
+                        // Jika memakai OPTION_CLOSEST_SYNC dan frame sama dengan frame sebelumnya (keyframe yang sama),
+                        // lewati perhitungan selisih untuk titik ini supaya tidak ada selisih palsu.
+                        val isIdenticalKeyframe = (retrievalOption == MediaMetadataRetriever.OPTION_CLOSEST_SYNC) && currGray.contentEquals(prevGray)
+                        if (!isIdenticalKeyframe) {
+                            var absSum = 0L
+                            for (i in 0 until TOTAL_PIXELS) {
+                                val v1 = currGray[i].toInt() and 0xFF
+                                val v2 = prevGray[i].toInt() and 0xFF
+                                absSum += abs(v1 - v2)
+                            }
+                            val diffScore = absSum.toFloat() / (TOTAL_PIXELS * 255f)
+                            rawDiffs.add(Pair(t, diffScore))
+                            System.arraycopy(currGray, 0, prevGray, 0, TOTAL_PIXELS)
                         }
-                        val diffScore = absSum.toFloat() / (TOTAL_PIXELS * 255f)
-                        rawDiffs.add(Pair(t, diffScore))
+                    } else {
+                        System.arraycopy(currGray, 0, prevGray, 0, TOTAL_PIXELS)
+                        hasPreviousFrame = true
                     }
-
-                    System.arraycopy(currGray, 0, prevGray, 0, TOTAL_PIXELS)
-                    hasPreviousFrame = true
                 }
 
                 currentStep++
-                if (currentStep % 10 == 0 || currentStep == totalSteps) {
+                if (currentStep % 5 == 0 || currentStep == totalSteps) {
                     val progress = (currentStep.toFloat() / totalSteps).coerceIn(0f, 1f)
                     val percentInt = (progress * 100).toInt()
-                    onProgress(progress, "Mendeteksi adegan... ($percentInt%)")
+                    val elapsedMs = System.currentTimeMillis() - startTimeMs
+
+                    // Hitung estimasi sisa waktu setelah minimal 5% selesai
+                    val etaText = if (progress >= 0.05f && elapsedMs > 500L) {
+                        val totalEstMs = (elapsedMs / progress.toDouble()).toLong()
+                        val remainingSec = ((totalEstMs - elapsedMs) / 1000L).coerceAtLeast(0L)
+                        if (remainingSec < 60L) {
+                            " (sekitar $remainingSec detik lagi)"
+                        } else {
+                            val minutes = ceil(remainingSec / 60.0).toInt().coerceAtLeast(1)
+                            " (sekitar $minutes menit lagi)"
+                        }
+                    } else {
+                        ""
+                    }
+
+                    onProgress(progress, "Mendeteksi adegan... ($percentInt%)$etaText")
                 }
 
                 t += stepSec
@@ -190,19 +226,36 @@ object SceneDetector {
             }
         }
 
-        Log.i(TAG, "Terdeteksi ${cutPoints.size} titik pergantian gambar alami: $cutPoints")
-
-        // Gabungkan dan pecah adegan yang lebih lama dari batas maksimum durasi adegan
-        val finalSpans = buildFinalSpans(
-            rawCutPoints = cutPoints,
-            startSec = actualStartSec,
-            endSec = actualEndSec,
-            maxDuration = maxSceneDurationSec
-        )
-
         val totalTimeMs = System.currentTimeMillis() - startTimeMs
-        Log.i(TAG, "Deteksi adegan selesai dalam ${totalTimeMs}ms: $processedFramesCount frame diproses, ${finalSpans.size} adegan dihasilkan")
-        finalSpans
+        Log.i(TAG, "Deteksi titik potong adegan selesai dalam ${totalTimeMs}ms: $processedFramesCount frame diproses, ${cutPoints.size} cut points ditemukan: $cutPoints")
+        cutPoints
+    }
+
+    /**
+     * Mendeteksi titik pergantian adegan lokal secara efisien dan membaginya sesuai batas maksimum durasi.
+     */
+    suspend fun detectSceneCuts(
+        context: Context,
+        videoUri: Uri,
+        startSec: Long,
+        endSec: Long,
+        maxSceneDurationSec: Int = 5,
+        onProgress: (Float, String) -> Unit = { _, _ -> }
+    ): List<SceneTimeSpan> = withContext(Dispatchers.IO) {
+        val actualStartSec = startSec.coerceAtLeast(0L)
+        val actualEndSec = endSec.coerceAtLeast(actualStartSec + 1L)
+        val rawCutPoints = detectRawCutPoints(context, videoUri, actualStartSec, actualEndSec, onProgress)
+
+        if (rawCutPoints != null) {
+            buildFinalSpans(
+                rawCutPoints = rawCutPoints,
+                startSec = actualStartSec,
+                endSec = actualEndSec,
+                maxDuration = maxSceneDurationSec
+            )
+        } else {
+            splitSpansFallback(actualStartSec, actualEndSec, maxSceneDurationSec)
+        }
     }
 
     /**

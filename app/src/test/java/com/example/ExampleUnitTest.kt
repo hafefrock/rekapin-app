@@ -1333,4 +1333,31 @@ class ExampleUnitTest {
         assertTrue(timelineExport.contains("Batas Durasi Adegan: Tanpa batas"))
         org.junit.Assert.assertFalse(timelineExport.contains("0 Detik"))
     }
+
+    @Test
+    fun testMaxSceneDurationChangeWithoutRedetection() {
+        val startSec = 0L
+        val endSec = 30L
+        // Titik potong mentah hasil deteksi: 12L (satu titik potong di detik 12)
+        val cutPoints = listOf(12L)
+
+        // 1. maxDuration = 5: adegan 0..12 dipecah (0-5, 5-10, 10-12), 12..30 dipecah (12-17, 17-22, 22-27, 27-30) -> 7 spans
+        val spans5 = com.example.util.SceneDetector.buildFinalSpans(cutPoints, startSec, endSec, maxDuration = 5)
+        assertEquals(7, spans5.size)
+
+        // 2. maxDuration = 10: adegan 0..12 dipecah (0-10, 10-12), 12..30 dipecah (12-22, 22-30) -> 4 spans
+        val spans10 = com.example.util.SceneDetector.buildFinalSpans(cutPoints, startSec, endSec, maxDuration = 10)
+        assertEquals(4, spans10.size)
+
+        // 3. maxDuration = 0 (Tanpa batas): adegan 0..12 dan 12..30 tidak dipecah -> 2 spans
+        val spans0 = com.example.util.SceneDetector.buildFinalSpans(cutPoints, startSec, endSec, maxDuration = 0)
+        assertEquals(2, spans0.size)
+        assertEquals(com.example.util.SceneTimeSpan(0L, 12L), spans0[0])
+        assertEquals(com.example.util.SceneTimeSpan(12L, 30L), spans0[1])
+
+        // Memverifikasi bahwa ketiga konfigurasi menghasilkan spans yang berbeda dari cutPoints yang sama tanpa perlu pemindaian ulang
+        org.junit.Assert.assertNotEquals(spans5, spans10)
+        org.junit.Assert.assertNotEquals(spans10, spans0)
+        org.junit.Assert.assertNotEquals(spans5, spans0)
+    }
 }

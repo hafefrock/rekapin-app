@@ -491,7 +491,8 @@ fun HomeScreen(
                         state = state,
                         activeKeyName = activeKeyName,
                         activeModelName = selectedModel,
-                        onCancel = { viewModel.cancelAnalysis() }
+                        onCancel = { viewModel.cancelAnalysis() },
+                        onSkipDetection = { viewModel.skipSceneDetection() }
                     )
                 }
 
@@ -2960,7 +2961,8 @@ private fun ProgressContent(
     state: AnalysisState,
     activeKeyName: String,
     activeModelName: String,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onSkipDetection: (() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
@@ -3159,6 +3161,87 @@ private fun ProgressContent(
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+
+                    is AnalysisState.Preparing -> {
+                        if (state.progress != null) {
+                            LinearProgressIndicator(
+                                progress = { state.progress },
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(CircleShape)
+                                    .testTag("preparing_progress_bar")
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            val percent = (state.progress * 100).toInt()
+                            Text(
+                                text = "Mempersiapkan Analisis Video",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "$percent% selesai",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 5.dp,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .testTag("preparing_circular_indicator")
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Mempersiapkan Analisis",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = state.message,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.testTag("preparing_message_text")
+                        )
+
+                        if (onSkipDetection != null && (state.progress != null || state.message.contains("deteksi", ignoreCase = true))) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = onSkipDetection,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("btn_skip_scene_detection")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Lewati deteksi, pakai interval tetap",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
 
                     else -> {

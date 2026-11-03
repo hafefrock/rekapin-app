@@ -6,7 +6,8 @@ sealed interface AnalysisState {
     object Idle : AnalysisState
 
     data class Preparing(
-        val message: String = "Mempersiapkan berkas video..."
+        val message: String = "Mempersiapkan berkas video...",
+        val progress: Float? = null
     ) : AnalysisState
 
     data class Uploading(
