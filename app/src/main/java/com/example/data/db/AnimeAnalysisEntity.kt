@@ -52,7 +52,10 @@ data class AnimeAnalysisEntity(
             return String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
 
-    fun toAnimeAnalysisResult(maxSceneDuration: Int = 5): AnimeAnalysisResult {
+    fun toAnimeAnalysisResult(
+        maxSceneDuration: Int = 5,
+        seriesBible: com.example.data.model.SeriesBible? = null
+    ): AnimeAnalysisResult {
         return AnimeAnalysisResult(
             narration = narration,
             characterSheet = AnalysisJsonAdapter.jsonToCharacterSheet(characterSheetJson),
@@ -66,7 +69,8 @@ data class AnimeAnalysisEntity(
             } else "",
             segmentModels = AnalysisJsonAdapter.jsonToSummaries(segmentModelsJson),
             segmentSummaries = AnalysisJsonAdapter.jsonToSummaries(segmentSummariesJson),
-            maxSceneDuration = maxSceneDuration
+            maxSceneDuration = maxSceneDuration,
+            seriesBible = seriesBible
         )
     }
 }

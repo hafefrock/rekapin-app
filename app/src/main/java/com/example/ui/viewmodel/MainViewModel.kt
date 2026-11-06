@@ -30,6 +30,8 @@ import com.example.data.prefs.ModelUsageStorage
 import com.example.data.prefs.NarrationLanguageStorage
 import com.example.data.prefs.NarrationModeStorage
 import com.example.data.prefs.SeriesStorage
+import com.example.data.prefs.SeriesBibleStorage
+import com.example.data.model.SeriesBible
 import com.example.data.prefs.VisualStyleStorage
 import com.example.data.repository.AnimeAnalysisRepository
 import com.example.data.model.PromptCutMode
@@ -84,7 +86,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val modelUsageStorage = ModelUsageStorage(context)
     val visualStyleStorage = VisualStyleStorage(context)
     val seriesStorage = SeriesStorage(context)
+    val seriesBibleStorage = SeriesBibleStorage(context)
     val promptCutModeStorage = PromptCutModeStorage(context)
+
+    // Pengaturan Memori Seri (Series Bible)
+    private val _isAutoBuildSeriesBible = MutableStateFlow(seriesBibleStorage.isAutoBuildEnabled())
+    val isAutoBuildSeriesBible: StateFlow<Boolean> = _isAutoBuildSeriesBible.asStateFlow()
+
+    fun toggleAutoBuildSeriesBible(enabled: Boolean) {
+        seriesBibleStorage.setAutoBuildEnabled(enabled)
+        _isAutoBuildSeriesBible.value = enabled
+        Log.i(TAG, "Pengaturan bangun memori seri otomatis diubah: $enabled")
+    }
+
+    private val _isPrependRecapNarration = MutableStateFlow(seriesBibleStorage.isPrependRecapEnabled())
+    val isPrependRecapNarration: StateFlow<Boolean> = _isPrependRecapNarration.asStateFlow()
+
+    fun togglePrependRecapNarration(enabled: Boolean) {
+        seriesBibleStorage.setPrependRecapEnabled(enabled)
+        _isPrependRecapNarration.value = enabled
+        Log.i(TAG, "Pengaturan recap 'Sebelumnya...' di awal narasi diubah: $enabled")
+    }
+
+    fun getSeriesBibleForAnalysis(id: Long): SeriesBible? = seriesBibleStorage.getBible(id)
 
     private val geminiClient = GeminiApiClient(
         apiKeyProvider = { apiKeyStorage.getEffectiveApiKey() },
@@ -491,13 +515,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteHistoryItem(id: Long) {
         viewModelScope.launch {
             repository.deleteById(id)
+            seriesStorage.removeSourceAnalysisId(id)
+            seriesBibleStorage.removeBible(id)
             if (_viewingHistoryItem.value?.id == id) {
                 _viewingHistoryItem.value = null
             }
             if (activeAnalysisId == id) {
                 activeAnalysisId = null
             }
-            Log.i(TAG, "Riwayat analisis ID $id dihapus dari database")
+            Log.i(TAG, "Riwayat analisis ID $id dihapus dari database dan memori seri")
         }
     }
 
@@ -1099,18 +1125,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Tentukan nilai awal character sheet SEBELUM loop dimulai
+                // Tentukan nilai awal character sheet dan memori seri SEBELUM loop dimulai
                 // Jika allCharacterSheet masih kosong (analisis baru atau melanjutkan analisis yang belum sempat menyelesaikan segmen 1)
-                if (allCharacterSheet.isEmpty() && activeEntityId != null) {
+                var activeSeriesBible: SeriesBible? = null
+                if (activeEntityId != null) {
                     val sourceAnalysisId = seriesStorage.getSourceAnalysisId(activeEntityId)
                     if (sourceAnalysisId != null) {
                         _selectedSeriesSourceId.value = sourceAnalysisId
-                        val sourceEntity = repository.getAnalysisById(sourceAnalysisId)
-                        if (sourceEntity != null && sourceEntity.characterSheetJson.isNotBlank()) {
-                            val initialChars = AnalysisJsonAdapter.jsonToCharacterSheet(sourceEntity.characterSheetJson)
-                            if (initialChars.isNotEmpty()) {
-                                allCharacterSheet.addAll(initialChars)
-                                Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId (${sourceEntity.videoName}) untuk analisis ID $activeEntityId")
+                        activeSeriesBible = seriesBibleStorage.getBible(sourceAnalysisId)
+                        if (activeSeriesBible != null) {
+                            Log.i(TAG, "Memori seri dimuat dari analisis sumber ID $sourceAnalysisId untuk analisis ID $activeEntityId: ${activeSeriesBible.locations.size} lokasi, ${activeSeriesBible.glossary.size} istilah")
+                        }
+                        if (allCharacterSheet.isEmpty()) {
+                            val sourceEntity = repository.getAnalysisById(sourceAnalysisId)
+                            if (sourceEntity != null && sourceEntity.characterSheetJson.isNotBlank()) {
+                                val initialChars = AnalysisJsonAdapter.jsonToCharacterSheet(sourceEntity.characterSheetJson)
+                                if (initialChars.isNotEmpty()) {
+                                    allCharacterSheet.addAll(initialChars)
+                                    Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId (${sourceEntity.videoName}) untuk analisis ID $activeEntityId")
+                                }
                             }
                         }
                     }
@@ -1453,6 +1486,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 mode = activeMode,
                                 language = activeLanguage,
                                 exactSceneSpans = exactScenes,
+                                seriesBible = activeSeriesBible,
                                 onStatusUpdate = { statusMsg ->
                                     _analysisState.value = AnalysisState.AnalyzingSegment(
                                         currentSegment = i + 1,
@@ -1558,11 +1592,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     while (!narrationSuccess) {
                         activeModel = modelList.getOrElse(currentModelIndex) { selectedModelName }
                         try {
+                            val previousRecapContext = if (seriesBibleStorage.isPrependRecapEnabled()) {
+                                activeSeriesBible?.plotSoFar?.takeIf { it.isNotBlank() }
+                            } else null
+
                             narration = geminiClient.generateFinalNarration(
                                 segmentSummaries = segmentSummaries,
                                 characterSheet = allCharacterSheet,
                                 model = activeModel,
                                 language = currentLang,
+                                previousRecapContext = previousRecapContext,
                                 onStatusUpdate = { msg ->
                                     _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = activeModel)
                                 }
@@ -1606,6 +1645,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
+                val currentBible = (activeEntityId?.let { seriesBibleStorage.getBible(it) }) ?: activeSeriesBible
                 val finalResult = AnimeAnalysisResult(
                     narration = narration,
                     characterSheet = allCharacterSheet,
@@ -1617,13 +1657,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     segmentModels = segmentModels,
                     segmentSummaries = segmentSummaries,
                     narrationMode = activeMode.displayName,
-                    maxSceneDuration = activeMaxSceneDur
+                    maxSceneDuration = activeMaxSceneDur,
+                    seriesBible = currentBible
                 )
 
                 Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
                 _analysisState.value = AnalysisState.Success(finalResult, styleName = activeStyle.name)
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyCompleted(context, video.displayName)
+
+                // Pembaruan memori seri otomatis (best-effort)
+                if (seriesBibleStorage.isAutoBuildEnabled() && activeEntityId != null) {
+                    val finalActiveEntityId = activeEntityId
+                    val finalVideoName = video.displayName
+                    val finalModel = activeModel
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            Log.i(TAG, "Memulai pembaruan memori seri otomatis untuk analisis ID $finalActiveEntityId (model: $finalModel)...")
+                            val updatedBible = geminiClient.updateSeriesBible(
+                                previousBible = activeSeriesBible,
+                                segmentSummaries = segmentSummaries,
+                                characterSheet = allCharacterSheet,
+                                videoName = finalVideoName,
+                                model = finalModel
+                            )
+                            if (updatedBible != null && !updatedBible.isEmpty()) {
+                                seriesBibleStorage.saveBible(finalActiveEntityId, updatedBible)
+                                Log.i(TAG, "Memori seri untuk analisis ID $finalActiveEntityId berhasil disimpan: ${updatedBible.locations.size} lokasi, ${updatedBible.glossary.size} istilah, ${updatedBible.relationships.size} relasi, ${updatedBible.episodes.size} episode.")
+                                val currentState = _analysisState.value
+                                if (currentState is AnalysisState.Success) {
+                                    _analysisState.value = currentState.copy(
+                                        result = currentState.result.copy(seriesBible = updatedBible)
+                                    )
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.message}")
+                        }
+                    }
+                }
 
             } catch (e: GeminiApiException) {
                 Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)

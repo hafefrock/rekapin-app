@@ -3,6 +3,9 @@ package com.example.data.api
 import android.content.Context
 import android.util.Log
 import com.example.data.model.CharacterInfo
+import com.example.data.model.BibleEpisode
+import com.example.data.model.SeriesBible
+import com.example.data.prefs.SeriesBibleStorage
 import com.example.data.model.NarrationLanguage
 import com.example.data.model.NarrationMode
 import com.example.data.model.SegmentAnalysisOutput
@@ -381,6 +384,7 @@ class GeminiApiClient(
         mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
         exactSceneSpans: List<String> = emptyList(),
+        seriesBible: SeriesBible? = null,
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
@@ -388,7 +392,7 @@ class GeminiApiClient(
         val stageName = "Analisis Segmen $currentSegment dari $totalSegments ($startFormatted - $endFormatted)"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Memulai analisis model '$model' offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s (adegan: ${exactSceneSpans.size}) di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Memulai analisis model '$model' offset: start=${startSec}s, end=${endSec}s, interval=${intervalSeconds}s (adegan: ${exactSceneSpans.size}, bible: ${seriesBible != null}) di thread: ${Thread.currentThread().name}")
         Log.d(TAG, "[$stageName] Karakter yang telah dikenal sebelumnya: ${previousCharacterSheet.map { it.name }}")
 
         val prompt = buildSegmentPrompt(
@@ -402,7 +406,8 @@ class GeminiApiClient(
             stylePrompt = stylePrompt,
             mode = mode,
             language = language,
-            exactSceneSpans = exactSceneSpans
+            exactSceneSpans = exactSceneSpans,
+            seriesBible = seriesBible
         )
 
         val requestPayload = JSONObject().apply {
@@ -485,12 +490,13 @@ class GeminiApiClient(
         characterSheet: List<CharacterInfo>,
         model: String = GeminiConstants.GEMINI_MODEL,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
+        previousRecapContext: String? = null,
         onStatusUpdate: (String) -> Unit
     ): String = withContext(Dispatchers.IO) {
         val stageName = "Penyusunan Narasi Rekap Video"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Menyusun narasi (${language.displayName}) dari ${segmentSummaries.size} ringkasan segmen model '$model' di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Menyusun narasi (${language.displayName}) dari ${segmentSummaries.size} ringkasan segmen model '$model' (recapSebelumnya=${!previousRecapContext.isNullOrBlank()}) di thread: ${Thread.currentThread().name}")
 
         val summariesText = segmentSummaries.mapIndexed { idx, sum ->
             "Segment ${idx + 1}: $sum"
@@ -511,6 +517,32 @@ class GeminiApiClient(
         - Stay faithful to the events. No clickbait, no exaggerated or misleading claims, and do not present the recap as official.
         - Treat everything as fiction. Do not mention real people or real-world groups.
         """.trimIndent()
+
+        val previousRecapInstruction = if (!previousRecapContext.isNullOrBlank()) {
+            if (language == NarrationLanguage.INDONESIAN) {
+                """
+                PREVIOUS STORYLINE CONTEXT FROM SERIES BIBLE:
+                $previousRecapContext
+
+                OPENING RECAP INSTRUCTION ("SEBELUMNYA DI..."):
+                - Mulai narasi secara alami dengan 2 sampai 3 kalimat "sebelumnya..." yang merangkum peristiwa penting dari cerita sebelumnya (diambil dari konteks di atas).
+                - Tulis dalam Bahasa Indonesia alami, hidup, dan bebas spoiler berlebihan untuk episode sekarang.
+                - Setelah 2-3 kalimat kilas balik tersebut, lanjutkan narasi langsung mengalir ke peristiwa episode ini.
+                """.trimIndent()
+            } else {
+                """
+                PREVIOUS STORYLINE CONTEXT FROM SERIES BIBLE:
+                $previousRecapContext
+
+                OPENING RECAP INSTRUCTION ("PREVIOUSLY ON..."):
+                - Begin the narration naturally with 2 to 3 concise "previously..." sentences summarizing relevant past events (drawn from the context above).
+                - Write in natural American English, completely spoiler-free for current events.
+                - After those 2-3 opening recap sentences, seamlessly transition directly into the events of this episode.
+                """.trimIndent()
+            }
+        } else {
+            ""
+        }
 
         val instructionBlock = if (language == NarrationLanguage.INDONESIAN) {
             """
@@ -553,7 +585,7 @@ class GeminiApiClient(
         KEY CHARACTERS:
         $charactersText
 
-        $instructionBlock
+        ${if (previousRecapInstruction.isNotBlank()) "$previousRecapInstruction\n\n        " else ""}$instructionBlock
 
         $youtubeSafeRules
 
@@ -751,6 +783,140 @@ class GeminiApiClient(
     }
 
     /**
+     * Memperbarui Memori Seri (Series Bible) secara kumulatif setelah episode selesai.
+     * Panggilan teks saja (tanpa video), meniru struktur generateFinalNarration.
+     */
+    suspend fun updateSeriesBible(
+        previousBible: SeriesBible?,
+        segmentSummaries: List<String>,
+        characterSheet: List<CharacterInfo>,
+        videoName: String,
+        model: String = GeminiConstants.GEMINI_MODEL,
+        onStatusUpdate: ((String) -> Unit)? = null
+    ): SeriesBible? = withContext(Dispatchers.IO) {
+        val stageName = "Pembaruan Memori Seri"
+        val apiKey = getValidApiKey(stageName)
+
+        Log.i(TAG, "[$stageName] Memperbarui memori seri untuk '$videoName' model '$model' di thread: ${Thread.currentThread().name}")
+
+        val previousBibleText = if (previousBible != null && !previousBible.isEmpty()) {
+            SeriesBibleStorage.toJson(previousBible)
+        } else {
+            "None (this is the first episode in the series)."
+        }
+
+        val summariesText = segmentSummaries.mapIndexed { idx, sum ->
+            "Segment ${idx + 1}: $sum"
+        }.joinToString("\n\n")
+
+        val charactersText = characterSheet.joinToString("\n") {
+            "- ${it.name}: ${it.description}"
+        }
+
+        val prompt = """
+        You are an expert anime continuity editor and series bible archivist.
+        Your task is to update the cumulative "Series Bible" (world lore, terminology, character dynamics, and overarching plot) by integrating the events of this newly concluded episode with any established continuity lore from previous episodes.
+
+        CURRENT EPISODE TITLE / IDENTIFIER:
+        $videoName
+
+        PREVIOUS SERIES BIBLE (IF ANY):
+        $previousBibleText
+
+        THIS EPISODE'S CHRONOLOGICAL SEGMENT SUMMARIES:
+        $summariesText
+
+        ESTABLISHED CHARACTERS:
+        $charactersText
+
+        INSTRUCTIONS:
+        1. LOCATIONS: Merge previous locations with any newly introduced or expanded key locations. Deduplicate names (case-insensitive). Keep descriptions concise and distinct. Retain established lore. Max 20 locations.
+        2. GLOSSARY: Merge previous terminology, abilities, titles, magic systems, technology, or lore terms. Retain official naming, spellings, and concise definitions. Max 30 terms.
+        3. RELATIONSHIPS: Merge and update character dynamics (e.g. rival, mentor, allied, estranged). Max 20 relationships.
+        4. PLOT SO FAR: Synthesize an updated, cumulative high-level summary of the entire series story up through this episode. Keep it concise, focused on key stakes and milestones, free of excessive minutiae or spoilers beyond this point. MUST be strictly under 1200 characters.
+        5. EPISODE RECAP: Write a tight 2 to 3 sentence recap summarizing specifically what occurred in THIS episode ($videoName). Under 300 characters.
+        6. General rule: do not invent facts; only record what is established in the summaries, character sheet, or existing bible.
+
+        OUTPUT FORMAT:
+        Return ONLY valid JSON (no markdown formatting, no code fences, no extra commentary):
+        {
+          "locations": [
+            { "name": "Location Name", "description": "Brief description" }
+          ],
+          "glossary": [
+            { "term": "Term/Concept", "definition": "Brief definition" }
+          ],
+          "relationships": [
+            { "characterA": "Name A", "characterB": "Name B", "relationship": "Dynamic" }
+          ],
+          "plotSoFar": "Cumulative high-level summary up through this episode under 1200 chars.",
+          "episodeRecap": "2-3 sentences summarizing this specific episode."
+        }
+        """.trimIndent()
+
+        val requestPayload = JSONObject().apply {
+            val contentsArray = JSONArray().apply {
+                val contentObj = JSONObject().apply {
+                    val partsArray = JSONArray().apply {
+                        put(JSONObject().apply { put("text", prompt) })
+                    }
+                    put("parts", partsArray)
+                }
+                put(contentObj)
+            }
+            put("contents", contentsArray)
+
+            val genConfig = JSONObject().apply {
+                put("responseMimeType", "application/json")
+                put("temperature", 0.3)
+            }
+            put("generationConfig", genConfig)
+        }.toString()
+
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val rawResponse = executeWithRetry(
+            stage = stageName,
+            url = endpoint,
+            jsonBody = requestPayload,
+            modelForCounting = model.trim(),
+            onStatusUpdate = { onStatusUpdate?.invoke(it) }
+        )
+
+        try {
+            val json = JSONObject(rawResponse)
+            val candidates = json.optJSONArray("candidates")
+            if (candidates != null && candidates.length() > 0) {
+                val firstCandidate = candidates.getJSONObject(0)
+                val content = firstCandidate.optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                if (parts != null && parts.length() > 0) {
+                    val text = parts.getJSONObject(0).optString("text", "").trim()
+                    val parsedBible = SeriesBibleStorage.fromJson(text)
+                    if (parsedBible != null) {
+                        var cleaned = text
+                        if (cleaned.startsWith("```json", ignoreCase = true)) cleaned = cleaned.substring(7)
+                        else if (cleaned.startsWith("```")) cleaned = cleaned.substring(3)
+                        if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length - 3)
+                        val textJson = JSONObject(cleaned.trim())
+                        val episodeRecap = textJson.optString("episodeRecap", "").trim().take(SeriesBible.MAX_EPISODE_RECAP_CHARS)
+
+                        val existingEpisodes = previousBible?.episodes ?: emptyList()
+                        val newEpisodes = existingEpisodes + BibleEpisode(videoName, episodeRecap)
+
+                        val finalBible = parsedBible.copy(episodes = newEpisodes).trimToLimits()
+                        Log.i(TAG, "[$stageName] Memori seri berhasil diperbarui (${finalBible.locations.size} lokasi, ${finalBible.glossary.size} istilah, ${finalBible.relationships.size} relasi, ${finalBible.episodes.size} episode)")
+                        return@withContext finalBible
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "[$stageName] Gagal membaca atau memproses respons memori seri: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Eksekusi request dengan jeda dan auto-retry backoff saat rate limit (429/503).
      * Dijalankan sepenuhnya di Dispatchers.IO.
      */
@@ -902,7 +1068,8 @@ class GeminiApiClient(
         stylePrompt: String = "2D Japanese anime style, high-definition, clean cel-shaded linework, vibrant colors, detailed background art",
         mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
-        exactSceneSpans: List<String> = emptyList()
+        exactSceneSpans: List<String> = emptyList(),
+        seriesBible: SeriesBible? = null
     ): String {
         val sampleTimestamps = if (isFirstSegment) {
             "00:00 - 00:05, 00:05 - 00:10"
@@ -925,6 +1092,42 @@ $listFormatted
             - Must be continuous and consecutive in intervals of $intervalSeconds seconds (e.g., $sampleTimestamps ...).
             - Start exactly at $startFormatted and proceed consecutively until $endFormatted.
             """.trimIndent()
+        }
+
+        val seriesBibleBlock = if (seriesBible != null && !seriesBible.isEmpty()) {
+            buildString {
+                appendLine("SERIES BIBLE FROM PREVIOUS EPISODES:")
+                appendLine("Use this only to keep names, terms, spellings, and locations CONSISTENT. Do NOT describe anything from it unless it is actually visible or audible in this segment. Do NOT reveal or hint at future events. Keep official names exactly as written.")
+                appendLine()
+                if (seriesBible.locations.isNotEmpty()) {
+                    appendLine("ESTABLISHED LOCATIONS:")
+                    seriesBible.locations.forEach { loc ->
+                        appendLine("- ${loc.name}: ${loc.description}")
+                    }
+                    appendLine()
+                }
+                if (seriesBible.glossary.isNotEmpty()) {
+                    appendLine("GLOSSARY / TERMS:")
+                    seriesBible.glossary.forEach { g ->
+                        appendLine("- ${g.term}: ${g.definition}")
+                    }
+                    appendLine()
+                }
+                if (seriesBible.relationships.isNotEmpty()) {
+                    appendLine("CHARACTER RELATIONSHIPS:")
+                    seriesBible.relationships.forEach { rel ->
+                        appendLine("- ${rel.characterA} & ${rel.characterB}: ${rel.relationship}")
+                    }
+                    appendLine()
+                }
+                if (seriesBible.plotSoFar.isNotBlank()) {
+                    appendLine("PLOT CONTEXT SO FAR:")
+                    appendLine(seriesBible.plotSoFar.trim())
+                    appendLine()
+                }
+            }.trim()
+        } else {
+            ""
         }
 
         val characterContext = if (previousCharacterSheet.isNotEmpty()) {
@@ -1028,7 +1231,7 @@ $listFormatted
             
             $languageBlock
             
-            $characterContext
+            ${if (seriesBibleBlock.isNotBlank()) "$seriesBibleBlock\n\n            " else ""}$characterContext
             
             OUTPUT JSON FORMAT:
             ${finalCheckReminder}Return ONLY a valid JSON object with exactly this schema:

@@ -845,7 +845,8 @@ class ExampleUnitTest {
             String::class.java,
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
-            List::class.java
+            List::class.java,
+            com.example.data.model.SeriesBible::class.java
         )
         method.isAccessible = true
 
@@ -862,7 +863,8 @@ class ExampleUnitTest {
             customPromptDesc,
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
-            emptyList<String>()
+            emptyList<String>(),
+            null
         ) as String
 
         // Memastikan prompt mengandung deskripsi gaya terpilih
@@ -895,7 +897,8 @@ class ExampleUnitTest {
             String::class.java,
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
-            List::class.java
+            List::class.java,
+            com.example.data.model.SeriesBible::class.java
         )
         method.isAccessible = true
 
@@ -905,7 +908,8 @@ class ExampleUnitTest {
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.DIALOG_KONTEN,
             com.example.data.model.NarrationLanguage.INDONESIAN,
-            emptyList<String>()
+            emptyList<String>(),
+            null
         ) as String
 
         assertTrue(
@@ -930,7 +934,8 @@ class ExampleUnitTest {
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.NARASI_ASLI,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
-            emptyList<String>()
+            emptyList<String>(),
+            null
         ) as String
 
         assertTrue(
@@ -955,7 +960,8 @@ class ExampleUnitTest {
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.INDONESIAN,
-            emptyList<String>()
+            emptyList<String>(),
+            null
         ) as String
 
         assertTrue(
@@ -973,7 +979,8 @@ class ExampleUnitTest {
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.DIALOG_KONTEN,
             com.example.data.model.NarrationLanguage.ORIGINAL,
-            emptyList<String>()
+            emptyList<String>(),
+            null
         ) as String
 
         assertTrue(
@@ -1208,7 +1215,8 @@ class ExampleUnitTest {
             String::class.java,
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
-            List::class.java
+            List::class.java,
+            com.example.data.model.SeriesBible::class.java
         )
         method.isAccessible = true
 
@@ -1218,7 +1226,8 @@ class ExampleUnitTest {
             emptyList<com.example.data.model.CharacterInfo>(), true, "",
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
-            exactScenes
+            exactScenes,
+            null
         ) as String
 
         assertTrue(prompt.contains("TIMESTAMPS (PER ADEGAN - EXACT REQUIRED LIST):"))
@@ -1360,4 +1369,191 @@ class ExampleUnitTest {
         org.junit.Assert.assertNotEquals(spans10, spans0)
         org.junit.Assert.assertNotEquals(spans5, spans0)
     }
+
+    @Test
+    fun testSeriesBibleJsonSerializationAndParsing() {
+        val bible = com.example.data.model.SeriesBible(
+            locations = listOf(
+                com.example.data.model.BibleLocation("Hidden Leaf Village", "Ninja village in Fire Country"),
+                com.example.data.model.BibleLocation("Valley of the End", "Waterfall gorge border")
+            ),
+            glossary = listOf(
+                com.example.data.model.BibleGlossaryItem("Chakra", "Spiritual and physical energy"),
+                com.example.data.model.BibleGlossaryItem("Rasengan", "Spiraling sphere of pure chakra")
+            ),
+            relationships = listOf(
+                com.example.data.model.BibleRelationship("Naruto", "Sasuke", "Rivals and best friends")
+            ),
+            plotSoFar = "Naruto and Sasuke clash at the Valley of the End after Sasuke decides to leave the village.",
+            episodes = listOf(
+                com.example.data.model.BibleEpisode("Episode 1", "The departure from the village."),
+                com.example.data.model.BibleEpisode("Episode 2", "The battle commences at the waterfall.")
+            )
+        )
+
+        // 1. Serialization
+        val json = com.example.data.prefs.SeriesBibleStorage.toJson(bible)
+        assertTrue(json.contains("Hidden Leaf Village"))
+        assertTrue(json.contains("Rasengan"))
+        assertTrue(json.contains("Valley of the End"))
+
+        // 2. Normal parsing
+        val parsed = com.example.data.prefs.SeriesBibleStorage.fromJson(json)
+        org.junit.Assert.assertNotNull(parsed)
+        assertEquals(2, parsed?.locations?.size)
+        assertEquals("Hidden Leaf Village", parsed?.locations?.get(0)?.name)
+        assertEquals(2, parsed?.glossary?.size)
+        assertEquals("Chakra", parsed?.glossary?.get(0)?.term)
+        assertEquals(1, parsed?.relationships?.size)
+        assertEquals(2, parsed?.episodes?.size)
+
+        // 3. Tolerant parsing with markdown code fences
+        val fencedJson = "```json\n$json\n```"
+        val parsedFenced = com.example.data.prefs.SeriesBibleStorage.fromJson(fencedJson)
+        org.junit.Assert.assertNotNull(parsedFenced)
+        assertEquals("Rasengan", parsedFenced?.glossary?.get(1)?.term)
+
+        // 4. Malformed JSON returns null without crashing
+        val invalidJson = "This is not valid json { [ ]"
+        val parsedInvalid = com.example.data.prefs.SeriesBibleStorage.fromJson(invalidJson)
+        org.junit.Assert.assertNull(parsedInvalid)
+
+        val emptyString = ""
+        org.junit.Assert.assertNull(com.example.data.prefs.SeriesBibleStorage.fromJson(emptyString))
+    }
+
+    @Test
+    fun testSeriesBibleLimitsEnforced() {
+        // Buat daftar melebihi batas: 25 lokasi (>20), 35 istilah (>30), 25 relasi (>20), 15 episode (>10)
+        val excessiveLocations = (1..25).map { com.example.data.model.BibleLocation("Loc $it", "Desc $it") }
+        val excessiveGlossary = (1..35).map { com.example.data.model.BibleGlossaryItem("Term $it", "Def $it") }
+        val excessiveRelations = (1..25).map { com.example.data.model.BibleRelationship("A $it", "B $it", "Rel $it") }
+        val longPlot = "A".repeat(1500) // > 1200
+        val excessiveEpisodes = (1..15).map { com.example.data.model.BibleEpisode("Ep $it", "Recap $it " + "X".repeat(400)) }
+
+        val bigBible = com.example.data.model.SeriesBible(
+            locations = excessiveLocations,
+            glossary = excessiveGlossary,
+            relationships = excessiveRelations,
+            plotSoFar = longPlot,
+            episodes = excessiveEpisodes
+        )
+
+        val trimmed = bigBible.trimToLimits()
+        assertEquals(com.example.data.model.SeriesBible.MAX_LOCATIONS, trimmed.locations.size)
+        assertEquals(com.example.data.model.SeriesBible.MAX_GLOSSARY, trimmed.glossary.size)
+        assertEquals(com.example.data.model.SeriesBible.MAX_RELATIONSHIPS, trimmed.relationships.size)
+        assertTrue(trimmed.plotSoFar.length <= com.example.data.model.SeriesBible.MAX_PLOT_CHARS)
+        assertEquals(com.example.data.model.SeriesBible.MAX_EPISODES, trimmed.episodes.size)
+        // Memastikan 10 episode terakhir dipertahankan
+        assertEquals("Ep 6", trimmed.episodes.first().videoName)
+        assertEquals("Ep 15", trimmed.episodes.last().videoName)
+        assertTrue(trimmed.episodes.first().recap.length <= com.example.data.model.SeriesBible.MAX_EPISODE_RECAP_CHARS)
+    }
+
+    @Test
+    fun testBuildSegmentPromptWithAndWithoutSeriesBible() {
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "dummy-key" })
+
+        val method = com.example.data.api.GeminiApiClient::class.java.getDeclaredMethod(
+            "buildSegmentPrompt",
+            String::class.java,
+            String::class.java,
+            Long::class.javaPrimitiveType,
+            Long::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+            List::class.java,
+            Boolean::class.javaPrimitiveType,
+            String::class.java,
+            com.example.data.model.NarrationMode::class.java,
+            com.example.data.model.NarrationLanguage::class.java,
+            List::class.java,
+            com.example.data.model.SeriesBible::class.java
+        )
+        method.isAccessible = true
+
+        val bible = com.example.data.model.SeriesBible(
+            locations = listOf(com.example.data.model.BibleLocation("Hueco Mundo", "Desert realm of Hollows")),
+            glossary = listOf(com.example.data.model.BibleGlossaryItem("Zanpakuto", "Soul-cutter sword")),
+            relationships = listOf(com.example.data.model.BibleRelationship("Ichigo", "Rukia", "Trusted allies")),
+            plotSoFar = "Ichigo broke into Hueco Mundo to rescue Orihime."
+        )
+
+        // 1. Prompt dengan SeriesBible
+        val promptWithBible = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            emptyList<String>(),
+            bible
+        ) as String
+
+        assertTrue(promptWithBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
+        assertTrue(promptWithBible.contains("Hueco Mundo"))
+        assertTrue(promptWithBible.contains("Zanpakuto"))
+        assertTrue(promptWithBible.contains("Ichigo & Rukia"))
+        assertTrue(promptWithBible.contains("Use this only to keep names, terms, spellings, and locations CONSISTENT."))
+        assertTrue(promptWithBible.contains("Do NOT describe anything from it unless it is actually visible or audible in this segment."))
+
+        // 2. Prompt tanpa SeriesBible (null)
+        val promptWithoutBible = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            emptyList<String>(),
+            null
+        ) as String
+
+        org.junit.Assert.assertFalse(promptWithoutBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
+        org.junit.Assert.assertFalse(promptWithoutBible.contains("Hueco Mundo"))
+
+        // 3. Prompt dengan SeriesBible kosong (empty)
+        val emptyBible = com.example.data.model.SeriesBible()
+        val promptEmptyBible = method.invoke(
+            client, "00:00", "03:00", 0L, 180L, 5,
+            emptyList<com.example.data.model.CharacterInfo>(), true, "",
+            com.example.data.model.NarrationMode.REKAP_VOICEOVER,
+            com.example.data.model.NarrationLanguage.ENGLISH_USA,
+            emptyList<String>(),
+            emptyBible
+        ) as String
+
+        org.junit.Assert.assertFalse(promptEmptyBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
+    }
+
+    @Test
+    fun testExportFormattersSeriesBible() {
+        val bible = com.example.data.model.SeriesBible(
+            locations = listOf(com.example.data.model.BibleLocation("Wall Maria", "Outermost human settlement wall")),
+            glossary = listOf(com.example.data.model.BibleGlossaryItem("ODM Gear", "Omni-directional mobility gear")),
+            relationships = listOf(com.example.data.model.BibleRelationship("Eren", "Mikasa", "Adoptive siblings and protectors")),
+            plotSoFar = "Wall Maria was breached by the Colossal Titan.",
+            episodes = listOf(com.example.data.model.BibleEpisode("Episode 1", "The fall of Shiganshina."))
+        )
+
+        val result = com.example.data.model.AnimeAnalysisResult(
+            narration = "Narrative test",
+            characterSheet = emptyList(),
+            timeline = emptyList(),
+            totalSegments = 1,
+            durationFormatted = "03:00",
+            intervalSeconds = 5,
+            videoName = "Attack on Titan Ep 1",
+            seriesBible = bible
+        )
+
+        val exportWithBible = com.example.ui.components.ExportFormatters.formatFullExport(result)
+        assertTrue(exportWithBible.contains("E. MEMORI SERI (SERIES BIBLE)"))
+        assertTrue(exportWithBible.contains("Wall Maria"))
+        assertTrue(exportWithBible.contains("ODM Gear"))
+        assertTrue(exportWithBible.contains("Eren & Mikasa"))
+        assertTrue(exportWithBible.contains("Colossal Titan"))
+
+        val resultNoBible = result.copy(seriesBible = null)
+        val exportNoBible = com.example.ui.components.ExportFormatters.formatFullExport(resultNoBible)
+        org.junit.Assert.assertFalse(exportNoBible.contains("E. MEMORI SERI (SERIES BIBLE)"))
+    }
 }
+

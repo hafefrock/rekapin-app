@@ -538,6 +538,7 @@ fun HistoryDetailScreen(
     narrationModeName: String = "",
     languageName: String = "",
     maxSceneDuration: Int = 5,
+    seriesBible: com.example.data.model.SeriesBible? = null,
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -626,12 +627,13 @@ fun HistoryDetailScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            val result = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration)
+            val result = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration, seriesBible = seriesBible)
             ResultView(
                 result = result,
                 styleName = styleName,
                 narrationModeName = narrationModeName,
                 languageName = languageName,
+                seriesBible = seriesBible,
                 modifier = Modifier.fillMaxSize()
             )
         }

@@ -57,15 +57,29 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.unit.sp
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.NarrationMode
+import com.example.data.model.SeriesBible
 import com.example.data.model.TimelineItem
 
 object ExportFormatters {
-    fun formatFullExport(result: AnimeAnalysisResult, narrationModeName: String = "", languageName: String = ""): String {
+    fun formatFullExport(
+        result: AnimeAnalysisResult,
+        narrationModeName: String = "",
+        languageName: String = "",
+        seriesBible: SeriesBible? = result.seriesBible
+    ): String {
         val modeLabel = narrationModeName.ifBlank {
             result.narrationMode.ifBlank {
                 NarrationMode.DEFAULT.displayName
@@ -141,8 +155,90 @@ object ExportFormatters {
                     appendLine()
                 }
             }
+            val bibleToExport = seriesBible ?: result.seriesBible
+            if (bibleToExport != null && !bibleToExport.isEmpty()) {
+                appendLine()
+                appendLine("E. MEMORI SERI (SERIES BIBLE)")
+                appendLine("--------------------------------------------------")
+                if (bibleToExport.plotSoFar.isNotBlank()) {
+                    appendLine("Ringkasan Cerita Sejauh Ini:")
+                    appendLine(bibleToExport.plotSoFar)
+                    appendLine()
+                }
+                if (bibleToExport.locations.isNotEmpty()) {
+                    appendLine("Lokasi Penting:")
+                    bibleToExport.locations.forEachIndexed { index, loc ->
+                        appendLine("${index + 1}. ${loc.name}")
+                        appendLine("   Deskripsi: ${loc.description}")
+                        appendLine()
+                    }
+                }
+                if (bibleToExport.glossary.isNotEmpty()) {
+                    appendLine("Daftar Istilah (Glossary):")
+                    bibleToExport.glossary.forEachIndexed { index, g ->
+                        appendLine("${index + 1}. ${g.term}")
+                        appendLine("   Arti: ${g.definition}")
+                        appendLine()
+                    }
+                }
+                if (bibleToExport.relationships.isNotEmpty()) {
+                    appendLine("Hubungan Antar Karakter:")
+                    bibleToExport.relationships.forEachIndexed { index, rel ->
+                        appendLine("${index + 1}. ${rel.characterA} & ${rel.characterB}: ${rel.relationship}")
+                    }
+                    appendLine()
+                }
+                if (bibleToExport.episodes.isNotEmpty()) {
+                    appendLine("Riwayat Episode:")
+                    bibleToExport.episodes.forEachIndexed { index, ep ->
+                        appendLine("${index + 1}. ${ep.videoName}: ${ep.recap}")
+                    }
+                    appendLine()
+                }
+            }
             appendLine("==================================================")
             appendLine("Dihasilkan oleh Rekapin Anime AI")
+        }.trimEnd()
+    }
+
+    fun formatSeriesBible(bible: SeriesBible): String {
+        return buildString {
+            appendLine("=== MEMORI SERI (SERIES BIBLE) ===")
+            if (bible.plotSoFar.isNotBlank()) {
+                appendLine("Ringkasan Cerita Sejauh Ini:")
+                appendLine(bible.plotSoFar)
+                appendLine()
+            }
+            if (bible.locations.isNotEmpty()) {
+                appendLine("Lokasi Penting (${bible.locations.size}):")
+                bible.locations.forEachIndexed { index, loc ->
+                    appendLine("${index + 1}. ${loc.name}")
+                    appendLine("   Deskripsi: ${loc.description}")
+                    appendLine()
+                }
+            }
+            if (bible.glossary.isNotEmpty()) {
+                appendLine("Daftar Istilah (${bible.glossary.size}):")
+                bible.glossary.forEachIndexed { index, g ->
+                    appendLine("${index + 1}. ${g.term}")
+                    appendLine("   Arti: ${g.definition}")
+                    appendLine()
+                }
+            }
+            if (bible.relationships.isNotEmpty()) {
+                appendLine("Hubungan Antar Karakter (${bible.relationships.size}):")
+                bible.relationships.forEachIndexed { index, rel ->
+                    appendLine("${index + 1}. ${rel.characterA} & ${rel.characterB}: ${rel.relationship}")
+                }
+                appendLine()
+            }
+            if (bible.episodes.isNotEmpty()) {
+                appendLine("Riwayat Episode (${bible.episodes.size}):")
+                bible.episodes.forEachIndexed { index, ep ->
+                    appendLine("${index + 1}. ${ep.videoName}: ${ep.recap}")
+                }
+                appendLine()
+            }
         }.trimEnd()
     }
 
@@ -405,8 +501,10 @@ fun ResultView(
     modifier: Modifier = Modifier,
     styleName: String = "Anime 2D standar",
     narrationModeName: String = "",
-    languageName: String = ""
+    languageName: String = "",
+    seriesBible: SeriesBible? = result.seriesBible
 ) {
+    val effectiveBible = seriesBible ?: result.seriesBible
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
@@ -437,7 +535,7 @@ fun ResultView(
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val exportText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName)
+                val exportText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName, effectiveBible)
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                     outputStream.write(exportText.toByteArray(Charsets.UTF_8))
                     outputStream.flush()
@@ -456,7 +554,7 @@ fun ResultView(
         effectiveModeName.contains("Asli", ignoreCase = true) -> "a. Narasi Asli"
         else -> "a. Narasi"
     }
-    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration, narasiTabLabel) {
+    val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration, narasiTabLabel, effectiveBible) {
         buildList {
             add("Semua Format")
             if (hasNarration) {
@@ -466,6 +564,9 @@ fun ResultView(
             add("c. Timeline (${result.timeline.size})")
             if (result.segmentSummaries.isNotEmpty()) {
                 add("d. Segmen (${result.segmentSummaries.size})")
+            }
+            if (effectiveBible != null && !effectiveBible.isEmpty()) {
+                add("e. Memori Seri")
             }
         }
     }
@@ -546,7 +647,7 @@ fun ResultView(
         ) {
             Button(
                 onClick = {
-                    val fullText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName)
+                    val fullText = ExportFormatters.formatFullExport(result, effectiveModeName, languageName, effectiveBible)
                     clipboard.setText(AnnotatedString(fullText))
                     notify("Tersalin")
                 },
@@ -717,10 +818,28 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
+            currentTabTitle.startsWith("e. Memori Seri") -> effectiveBible?.let { bible ->
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        SeriesBibleSection(
+                            bible = bible,
+                            onCopy = {
+                                clipboard.setText(AnnotatedString(ExportFormatters.formatSeriesBible(bible)))
+                                notify("Tersalin")
+                            },
+                            defaultExpanded = true
+                        )
+                    }
+                }
+            } ?: Text("Tidak ada memori seri.")
             else -> AllResultsSection(
                 result = result,
                 styleName = styleName,
                 narrationModeName = effectiveModeName,
+                seriesBible = effectiveBible,
                 onCopyNarration = {
                     clipboard.setText(AnnotatedString(result.narration))
                     notify("Tersalin")
@@ -744,6 +863,12 @@ fun ResultView(
                 onCopySegmentSummaries = {
                     clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(result.segmentSummaries, result.segmentModels)))
                     notify("Tersalin")
+                },
+                onCopySeriesBible = {
+                    effectiveBible?.let {
+                        clipboard.setText(AnnotatedString(ExportFormatters.formatSeriesBible(it)))
+                        notify("Tersalin")
+                    }
                 }
             )
         }
@@ -755,12 +880,14 @@ private fun AllResultsSection(
     result: AnimeAnalysisResult,
     styleName: String = "Anime 2D standar",
     narrationModeName: String = "",
+    seriesBible: SeriesBible? = null,
     onCopyNarration: () -> Unit,
     onCopyCharacters: () -> Unit,
     onCopyTimeline: () -> Unit,
     onCopyAllVisualPrompts: () -> Unit,
     onCopyScenePrompt: (String) -> Unit,
-    onCopySegmentSummaries: () -> Unit
+    onCopySegmentSummaries: () -> Unit,
+    onCopySeriesBible: () -> Unit = {}
 ) {
     val (stepLabel, subtitle) = when {
         narrationModeName.contains("Dialog", ignoreCase = true) ->
@@ -875,6 +1002,241 @@ private fun AllResultsSection(
                     modelName = modelName,
                     onCopy = { onCopyScenePrompt(summary) }
                 )
+            }
+        }
+
+        // Section e: Memori Seri (jika ada)
+        if (seriesBible != null && !seriesBible.isEmpty()) {
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                SectionHeader(
+                    stepLabel = "e. Memori Seri (Series Bible)",
+                    subtitle = "Latar dunia, istilah khusus, relasi karakter, dan ringkasan kumulatif cerita",
+                    onCopy = onCopySeriesBible,
+                    copyLabel = "Salin"
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SeriesBibleSection(
+                    bible = seriesBible,
+                    onCopy = onCopySeriesBible,
+                    defaultExpanded = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SeriesBibleSection(
+    bible: SeriesBible,
+    onCopy: () -> Unit,
+    modifier: Modifier = Modifier,
+    defaultExpanded: Boolean = true
+) {
+    var isExpanded by remember { mutableStateOf(defaultExpanded) }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .testTag("card_series_bible_section")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bookmark,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Memori Seri (Series Bible)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${bible.locations.size} lokasi • ${bible.glossary.size} istilah • ${bible.relationships.size} relasi",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onCopy,
+                        modifier = Modifier.testTag("btn_copy_series_bible")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Salin Memori Seri",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(onClick = { isExpanded = !isExpanded }) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isExpanded) "Tutup" else "Buka",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (bible.plotSoFar.isNotBlank()) {
+                        Text(
+                            text = "Ringkasan Cerita Sejauh Ini",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = bible.plotSoFar,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            lineHeight = 17.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .padding(10.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    if (bible.locations.isNotEmpty()) {
+                        Text(
+                            text = "Lokasi Penting (${bible.locations.size})",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        bible.locations.forEach { loc ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = loc.name,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (loc.description.isNotBlank()) {
+                                    Text(
+                                        text = loc.description,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    if (bible.glossary.isNotEmpty()) {
+                        Text(
+                            text = "Daftar Istilah (${bible.glossary.size})",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        bible.glossary.forEach { g ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = g.term,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.widthIn(min = 80.dp, max = 130.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = g.definition,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 15.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    if (bible.relationships.isNotEmpty()) {
+                        Text(
+                            text = "Hubungan Antar Karakter (${bible.relationships.size})",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        bible.relationships.forEach { rel ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${rel.characterA} ↔ ${rel.characterB}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.widthIn(min = 90.dp, max = 150.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = rel.relationship,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

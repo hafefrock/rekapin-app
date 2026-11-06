@@ -154,6 +154,8 @@ fun HomeScreen(
     val promptCutMode by viewModel.promptCutMode.collectAsState()
     val maxSceneDurationSeconds by viewModel.maxSceneDurationSeconds.collectAsState()
     val detectedSceneCount by viewModel.detectedSceneCount.collectAsState()
+    val isAutoBuildSeriesBible by viewModel.isAutoBuildSeriesBible.collectAsState()
+    val isPrependRecapNarration by viewModel.isPrependRecapNarration.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -234,6 +236,7 @@ fun HomeScreen(
             narrationModeName = viewModel.getModeNameForAnalysis(historyEntity.id),
             languageName = narrationLanguage.displayName,
             maxSceneDuration = viewModel.getMaxDurationForAnalysis(historyEntity.id),
+            seriesBible = viewModel.getSeriesBibleForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
                 requestNotificationAndStart {
@@ -538,6 +541,7 @@ fun HomeScreen(
                         onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
                         selectedSeriesSourceId = selectedSeriesSourceId,
                         selectedSeriesSourceName = selectedSeriesSourceName,
+                        selectedSeriesSourceBible = selectedSeriesSourceId?.let { viewModel.getSeriesBibleForAnalysis(it) },
                         onSelectSeriesSource = { viewModel.selectSeriesSource(it) },
                         onOpenSettings = { viewModel.openSettings() },
                         onOpenHistory = { viewModel.openHistory() },
@@ -637,7 +641,11 @@ fun HomeScreen(
                 modelUsageStorage = viewModel.modelUsageStorage,
                 onSetModelLimit = { model, limit -> viewModel.setModelLimit(model, limit) },
                 onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) },
-                onTestKey = { key -> viewModel.testApiKey(key) }
+                onTestKey = { key -> viewModel.testApiKey(key) },
+                isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+                onToggleAutoBuildSeriesBible = { viewModel.toggleAutoBuildSeriesBible(it) },
+                isPrependRecapNarration = isPrependRecapNarration,
+                onTogglePrependRecapNarration = { viewModel.togglePrependRecapNarration(it) }
             )
         }
 
@@ -706,6 +714,7 @@ private fun IdleSetupContent(
     onFinishWithoutCurrentSegment: (Long) -> Unit,
     selectedSeriesSourceId: Long?,
     selectedSeriesSourceName: String,
+    selectedSeriesSourceBible: com.example.data.model.SeriesBible? = null,
     onSelectSeriesSource: (Long?) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -2221,6 +2230,21 @@ private fun IdleSetupContent(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                if (selectedSeriesSourceId != null) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    val bibleInfoText = if (selectedSeriesSourceBible != null && !selectedSeriesSourceBible.isEmpty()) {
+                                        "Memori seri: ${selectedSeriesSourceBible.locations.size} lokasi, ${selectedSeriesSourceBible.glossary.size} istilah"
+                                    } else {
+                                        "Belum ada memori seri (akan dibuat setelah analisis ini selesai)"
+                                    }
+                                    Text(
+                                        text = bibleInfoText,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                         Icon(

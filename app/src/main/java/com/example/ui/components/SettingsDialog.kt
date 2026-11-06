@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
@@ -116,7 +117,11 @@ fun SettingsDialog(
     modelUsageStorage: com.example.data.prefs.ModelUsageStorage? = null,
     onSetModelLimit: ((model: String, limit: Int) -> Unit)? = null,
     onSetModelUsage: ((model: String, usage: Int) -> Unit)? = null,
-    onTestKey: (suspend (key: String) -> Pair<Boolean, String>)? = null
+    onTestKey: (suspend (key: String) -> Pair<Boolean, String>)? = null,
+    isAutoBuildSeriesBible: Boolean = true,
+    onToggleAutoBuildSeriesBible: ((Boolean) -> Unit)? = null,
+    isPrependRecapNarration: Boolean = false,
+    onTogglePrependRecapNarration: ((Boolean) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -260,6 +265,26 @@ fun SettingsDialog(
                             }
                         },
                         modifier = Modifier.testTag("tab_settings_visual_styles")
+                    )
+                    Tab(
+                        selected = selectedTab == 4,
+                        onClick = { selectedTab = 4 },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Bookmark,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Memori Seri",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        },
+                        modifier = Modifier.testTag("tab_settings_series_bible")
                     )
                 }
 
@@ -1239,6 +1264,103 @@ fun SettingsDialog(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                if (selectedTab == 4) {
+                    // TAB 4: Memori Seri (Series Bible)
+                    Text(
+                        text = "Kelola otomatisasi memori seri untuk menjaga konsistensi nama, lokasi, istilah, dan relasi antarepisode.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Switch 1: Bangun memori seri otomatis
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "Bangun memori seri otomatis",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Memakai 1 permintaan tambahan ke Gemini per analisis. Memperbarui daftar lokasi, istilah, relasi, dan ringkasan episode.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            Switch(
+                                checked = isAutoBuildSeriesBible,
+                                onCheckedChange = { onToggleAutoBuildSeriesBible?.invoke(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                ),
+                                modifier = Modifier.testTag("switch_auto_build_series_bible")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Switch 2: Tambahkan recap 'Sebelumnya...' di awal narasi
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "Tambahkan recap 'Sebelumnya...' di awal narasi",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Menyertakan 2-3 kalimat kilas balik dari episode sebelumnya di awal narasi rekap (bebas spoiler).",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            Switch(
+                                checked = isPrependRecapNarration,
+                                onCheckedChange = { onTogglePrependRecapNarration?.invoke(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                ),
+                                modifier = Modifier.testTag("switch_prepend_recap_narration")
+                            )
                         }
                     }
                 }
