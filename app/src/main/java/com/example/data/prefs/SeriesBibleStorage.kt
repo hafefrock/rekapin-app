@@ -19,6 +19,7 @@ class SeriesBibleStorage(context: Context) {
         private const val PREFS_NAME = "rekapin_series_bible_prefs"
         private const val KEY_AUTO_BUILD = "pref_auto_build_series_bible"
         private const val KEY_PREPEND_RECAP = "pref_prepend_recap_narration"
+        private const val KEY_BUILD_FAILED_PREFIX = "build_failed_"
 
         /**
          * Mengubah objek SeriesBible menjadi string JSON yang rapi dan mematuhi batas ukuran.
@@ -164,7 +165,10 @@ class SeriesBibleStorage(context: Context) {
      */
     fun saveBible(analysisId: Long, bible: SeriesBible) {
         val json = toJson(bible)
-        prefs.edit().putString(analysisId.toString(), json).apply()
+        prefs.edit()
+            .putString(analysisId.toString(), json)
+            .remove(KEY_BUILD_FAILED_PREFIX + analysisId)
+            .apply()
     }
 
     /**
@@ -180,8 +184,28 @@ class SeriesBibleStorage(context: Context) {
      * Menghapus memori seri ketika analisis dihapus dari riwayat.
      */
     fun removeBible(analysisId: Long) {
-        prefs.edit().remove(analysisId.toString()).apply()
+        prefs.edit()
+            .remove(analysisId.toString())
+            .remove(KEY_BUILD_FAILED_PREFIX + analysisId)
+            .apply()
     }
+
+    fun markBuildFailed(analysisId: Long) {
+        prefs.edit().putBoolean(KEY_BUILD_FAILED_PREFIX + analysisId, true).apply()
+    }
+
+    fun clearBuildFailed(analysisId: Long) {
+        prefs.edit().remove(KEY_BUILD_FAILED_PREFIX + analysisId).apply()
+    }
+
+    fun hasBuildFailed(analysisId: Long): Boolean =
+        prefs.getBoolean(KEY_BUILD_FAILED_PREFIX + analysisId, false)
+
+    fun getFailedBuildAnalysisIds(): Set<Long> = prefs.all.keys
+        .asSequence()
+        .filter { it.startsWith(KEY_BUILD_FAILED_PREFIX) && prefs.getBoolean(it, false) }
+        .mapNotNull { it.removePrefix(KEY_BUILD_FAILED_PREFIX).toLongOrNull() }
+        .toSet()
 
     /**
      * Saklar: Bangun memori seri otomatis setelah analisis selesai (default: true).

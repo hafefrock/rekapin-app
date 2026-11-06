@@ -45,6 +45,28 @@ data class SeriesBible(
                 episodes.isEmpty()
     }
 
+    fun withUpdatedEpisode(videoName: String, recap: String): SeriesBible {
+        val normalizedName = videoName.trim().lowercase(java.util.Locale.ROOT)
+        val uniqueEpisodes = linkedMapOf<String, BibleEpisode>()
+        val updatedEpisode = BibleEpisode(videoName.trim(), recap.trim())
+        var replacedExisting = false
+        episodes.forEach { episode ->
+            val key = episode.videoName.trim().lowercase(java.util.Locale.ROOT)
+            if (key.isNotBlank()) {
+                if (key == normalizedName) {
+                    if (!replacedExisting) uniqueEpisodes[key] = updatedEpisode
+                    replacedExisting = true
+                } else if (!uniqueEpisodes.containsKey(key)) {
+                    uniqueEpisodes[key] = episode.copy(videoName = episode.videoName.trim())
+                }
+            }
+        }
+        if (normalizedName.isNotBlank() && !replacedExisting) {
+            uniqueEpisodes[normalizedName] = updatedEpisode
+        }
+        return copy(episodes = uniqueEpisodes.values.toList()).trimToLimits()
+    }
+
     /**
      * Memangkas data memori seri agar tidak melebihi batasan ukuran yang ditentukan:
      * - Maksimal 20 lokasi

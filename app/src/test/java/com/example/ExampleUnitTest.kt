@@ -846,7 +846,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
             List::class.java,
-            com.example.data.model.SeriesBible::class.java
+            com.example.data.model.SeriesBible::class.java,
+            String::class.java
         )
         method.isAccessible = true
 
@@ -864,7 +865,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             emptyList<String>(),
-            null
+            null,
+            ""
         ) as String
 
         // Memastikan prompt mengandung deskripsi gaya terpilih
@@ -874,6 +876,8 @@ class ExampleUnitTest {
             "Prompt harus berisi aturan pembatasan gaya",
             prompt.contains("Follow only the selected style; do not mix other styles")
         )
+        assertTrue(prompt.contains("[Subject], [Action], [Camera], [Lighting], [Mood], [Background]"))
+        assertTrue(prompt.contains("[Background: environment, architecture, and relevant details]"))
         // Memastikan teks lama "Never 3D, never photorealistic" sudah tidak ada
         org.junit.Assert.assertFalse(
             "Prompt tidak boleh mengandung kalimat lama 'Never 3D, never photorealistic'",
@@ -898,7 +902,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
             List::class.java,
-            com.example.data.model.SeriesBible::class.java
+            com.example.data.model.SeriesBible::class.java,
+            String::class.java
         )
         method.isAccessible = true
 
@@ -909,8 +914,11 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.DIALOG_KONTEN,
             com.example.data.model.NarrationLanguage.INDONESIAN,
             emptyList<String>(),
-            null
+            null,
+            "Voice-like activity detected around 00:10-00:13."
         ) as String
+        assertTrue(promptDialogId.contains("LOCAL AUDIO ACTIVITY HINT (approximate, not a transcript):"))
+        assertTrue(promptDialogId.contains("Voice-like activity detected around 00:10-00:13."))
 
         assertTrue(
             "Prompt Dialog Konten Indonesia harus memuat aturan LANGUAGE (STRICT) dengan Indonesian",
@@ -935,7 +943,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.NARASI_ASLI,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             emptyList<String>(),
-            null
+            null,
+            ""
         ) as String
 
         assertTrue(
@@ -961,7 +970,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.INDONESIAN,
             emptyList<String>(),
-            null
+            null,
+            ""
         ) as String
 
         assertTrue(
@@ -972,6 +982,7 @@ class ExampleUnitTest {
             "Prompt Rekap Voiceover tidak boleh memuat Final check dialog/narasi",
             promptRekap.contains("Final check: every 'dialogue' and 'originalNarration' value must be written in")
         )
+        org.junit.Assert.assertFalse(promptRekap.contains("LOCAL AUDIO ACTIVITY HINT"))
 
         // 4. DIALOG_KONTEN dengan Bahasa Asli (ORIGINAL)
         val promptDialogOriginal = method.invoke(
@@ -980,7 +991,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.DIALOG_KONTEN,
             com.example.data.model.NarrationLanguage.ORIGINAL,
             emptyList<String>(),
-            null
+            null,
+            ""
         ) as String
 
         assertTrue(
@@ -1216,7 +1228,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
             List::class.java,
-            com.example.data.model.SeriesBible::class.java
+            com.example.data.model.SeriesBible::class.java,
+            String::class.java
         )
         method.isAccessible = true
 
@@ -1227,7 +1240,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             exactScenes,
-            null
+            null,
+            ""
         ) as String
 
         assertTrue(prompt.contains("TIMESTAMPS (PER ADEGAN - EXACT REQUIRED LIST):"))
@@ -1452,6 +1466,68 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testSeriesBibleEpisodeUpsertDoesNotDuplicateVideoName() {
+        val bible = com.example.data.model.SeriesBible(
+            episodes = listOf(
+                com.example.data.model.BibleEpisode("Episode 01.mp4", "Old recap"),
+                com.example.data.model.BibleEpisode("Episode 02.mp4", "Other recap")
+            )
+        )
+
+        val updated = bible.withUpdatedEpisode("episode 01.MP4", "Updated recap")
+
+        assertEquals(2, updated.episodes.size)
+        assertEquals("Updated recap", updated.episodes.first().recap)
+        assertEquals("Episode 02.mp4", updated.episodes.last().videoName)
+    }
+
+    @Test
+    fun testOpeningEndingFingerprintRequiresOrderedFrameRun() {
+        val random = java.util.Random(42L)
+        val template = (0 until 10).map { index ->
+            com.example.util.FrameFingerprint(index * 3L, random.nextLong())
+        }
+        val current = listOf(com.example.util.FrameFingerprint(0L, -1L)) +
+            template.take(8).mapIndexed { index, frame -> frame.copy(timeSec = (index + 1) * 3L) }
+
+        val match = com.example.util.OpeningEndingDetector.longestOrderedRun(template, current)
+
+        assertEquals(1 to 8, match)
+    }
+
+    @Test
+    fun testCharacterContinuityCheckerFlagsConflictingHairColor() {
+        val previous = listOf(
+            com.example.data.model.CharacterInfo("Aiko", "Aiko has short blue hair, bright green eyes, and a red coat.")
+        )
+        val current = listOf(
+            com.example.data.model.CharacterInfo("aiko", "Aiko has long red hair, bright green eyes, and a red coat.")
+        )
+
+        val warnings = com.example.util.CharacterContinuityChecker.findContradictions(previous, current)
+
+        assertEquals(1, warnings.size)
+        assertTrue(warnings.single().contains("warna rambut"))
+    }
+
+    @Test
+    fun testRepeatedSceneDetectorRequiresSeparatedOrderedRun() {
+        val random = java.util.Random(17L)
+        val repeated = (0 until 4).map { random.nextLong() }
+        val frames = buildList {
+            repeated.forEachIndexed { index, hash -> add(com.example.util.FrameFingerprint(index * 5L, hash)) }
+            repeat(4) { index -> add(com.example.util.FrameFingerprint((index + 4) * 5L, random.nextLong())) }
+            repeated.forEachIndexed { index, hash -> add(com.example.util.FrameFingerprint((index + 8) * 5L, hash)) }
+        }
+
+        val matches = com.example.util.RepeatedSceneDetector.findRepeatedRuns(frames, 5L)
+
+        assertEquals(1, matches.size)
+        assertEquals(0L, matches.single().firstStartSec)
+        assertEquals(40L, matches.single().secondStartSec)
+    }
+
+    @Test
     fun testBuildSegmentPromptWithAndWithoutSeriesBible() {
         val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "dummy-key" })
 
@@ -1468,7 +1544,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode::class.java,
             com.example.data.model.NarrationLanguage::class.java,
             List::class.java,
-            com.example.data.model.SeriesBible::class.java
+            com.example.data.model.SeriesBible::class.java,
+            String::class.java
         )
         method.isAccessible = true
 
@@ -1486,7 +1563,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             emptyList<String>(),
-            bible
+            bible,
+            ""
         ) as String
 
         assertTrue(promptWithBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
@@ -1503,7 +1581,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             emptyList<String>(),
-            null
+            null,
+            ""
         ) as String
 
         org.junit.Assert.assertFalse(promptWithoutBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
@@ -1517,7 +1596,8 @@ class ExampleUnitTest {
             com.example.data.model.NarrationMode.REKAP_VOICEOVER,
             com.example.data.model.NarrationLanguage.ENGLISH_USA,
             emptyList<String>(),
-            emptyBible
+            emptyBible,
+            ""
         ) as String
 
         org.junit.Assert.assertFalse(promptEmptyBible.contains("SERIES BIBLE FROM PREVIOUS EPISODES:"))
@@ -1556,4 +1636,3 @@ class ExampleUnitTest {
         org.junit.Assert.assertFalse(exportNoBible.contains("E. MEMORI SERI (SERIES BIBLE)"))
     }
 }
-

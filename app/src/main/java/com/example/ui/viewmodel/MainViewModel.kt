@@ -31,6 +31,9 @@ import com.example.data.prefs.NarrationLanguageStorage
 import com.example.data.prefs.NarrationModeStorage
 import com.example.data.prefs.SeriesStorage
 import com.example.data.prefs.SeriesBibleStorage
+import com.example.data.prefs.OpeningEndingStorage
+import com.example.data.prefs.ContinuityWarningStorage
+import com.example.data.prefs.RepeatedSceneStorage
 import com.example.data.model.SeriesBible
 import com.example.data.prefs.VisualStyleStorage
 import com.example.data.repository.AnimeAnalysisRepository
@@ -38,6 +41,11 @@ import com.example.data.model.PromptCutMode
 import com.example.data.prefs.PromptCutModeStorage
 import com.example.service.AnalysisForegroundService
 import com.example.util.SceneDetector
+import com.example.util.OpeningEndingDetector
+import com.example.util.AudioActivityDetector
+import com.example.util.CharacterContinuityChecker
+import com.example.util.RepeatedSceneDetector
+import com.example.util.RepeatedSceneMatch
 import com.example.util.SceneTimeSpan
 import com.example.util.SegmentCalculator
 import com.example.util.SegmentDurationOption
@@ -87,11 +95,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val visualStyleStorage = VisualStyleStorage(context)
     val seriesStorage = SeriesStorage(context)
     val seriesBibleStorage = SeriesBibleStorage(context)
+    private val openingEndingStorage = OpeningEndingStorage(context)
+    private val continuityWarningStorage = ContinuityWarningStorage(context)
+    private val repeatedSceneStorage = RepeatedSceneStorage(context)
     val promptCutModeStorage = PromptCutModeStorage(context)
 
     // Pengaturan Memori Seri (Series Bible)
     private val _isAutoBuildSeriesBible = MutableStateFlow(seriesBibleStorage.isAutoBuildEnabled())
     val isAutoBuildSeriesBible: StateFlow<Boolean> = _isAutoBuildSeriesBible.asStateFlow()
+
+    private val _failedSeriesBibleBuildIds = MutableStateFlow(seriesBibleStorage.getFailedBuildAnalysisIds())
+    val failedSeriesBibleBuildIds: StateFlow<Set<Long>> = _failedSeriesBibleBuildIds.asStateFlow()
+    private val _seriesBibleBuildFailureNotice = MutableStateFlow<Long?>(null)
+    val seriesBibleBuildFailureNotice: StateFlow<Long?> = _seriesBibleBuildFailureNotice.asStateFlow()
+    private val _seriesBibleBuildInProgressId = MutableStateFlow<Long?>(null)
+    val seriesBibleBuildInProgressId: StateFlow<Long?> = _seriesBibleBuildInProgressId.asStateFlow()
+
+    fun dismissSeriesBibleBuildFailureNotice() {
+        _seriesBibleBuildFailureNotice.value = null
+    }
+
+    private fun recordSeriesBibleBuildFailure(analysisId: Long) {
+        seriesBibleStorage.markBuildFailed(analysisId)
+        _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value + analysisId
+        _seriesBibleBuildFailureNotice.value = analysisId
+    }
+
+    fun buildSeriesBibleNow(analysisId: Long) {
+        if (_seriesBibleBuildInProgressId.value != null) return
+        viewModelScope.launch {
+            _seriesBibleBuildInProgressId.value = analysisId
+            try {
+                val entity = repository.getAnalysisById(analysisId)
+                if (entity == null || !entity.isCompleted) {
+                    recordSeriesBibleBuildFailure(analysisId)
+                    return@launch
+                }
+                val result = geminiClient.updateSeriesBible(
+                    previousBible = seriesBibleStorage.getBible(analysisId),
+                    segmentSummaries = AnalysisJsonAdapter.jsonToSummaries(entity.segmentSummariesJson),
+                    characterSheet = AnalysisJsonAdapter.jsonToCharacterSheet(entity.characterSheetJson),
+                    videoName = entity.videoName,
+                    model = modelStorage.getSelectedModel()
+                )
+                if (result != null && !result.isEmpty()) {
+                    seriesBibleStorage.saveBible(analysisId, result)
+                    _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value - analysisId
+                    if (_seriesBibleBuildFailureNotice.value == analysisId) {
+                        _seriesBibleBuildFailureNotice.value = null
+                    }
+                    val currentState = _analysisState.value
+                    if (currentState is AnalysisState.Success && viewingHistoryItem.value?.id == analysisId) {
+                        _analysisState.value = currentState.copy(result = currentState.result.copy(seriesBible = result))
+                    }
+                } else {
+                    recordSeriesBibleBuildFailure(analysisId)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Gagal membangun ulang Memori Seri untuk analisis $analysisId: ${e.message}")
+                recordSeriesBibleBuildFailure(analysisId)
+            } finally {
+                _seriesBibleBuildInProgressId.value = null
+            }
+        }
+    }
 
     fun toggleAutoBuildSeriesBible(enabled: Boolean) {
         seriesBibleStorage.setAutoBuildEnabled(enabled)
@@ -109,6 +178,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getSeriesBibleForAnalysis(id: Long): SeriesBible? = seriesBibleStorage.getBible(id)
+    fun getContinuityWarningsForAnalysis(id: Long): List<String> = continuityWarningStorage.get(id)
+    fun getRepeatedSceneNotesForAnalysis(id: Long): List<String> = repeatedSceneStorage.get(id)
 
     private val geminiClient = GeminiApiClient(
         apiKeyProvider = { apiKeyStorage.getEffectiveApiKey() },
@@ -517,6 +588,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteById(id)
             seriesStorage.removeSourceAnalysisId(id)
             seriesBibleStorage.removeBible(id)
+            continuityWarningStorage.remove(id)
+            repeatedSceneStorage.remove(id)
+            _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value - id
             if (_viewingHistoryItem.value?.id == id) {
                 _viewingHistoryItem.value = null
             }
@@ -1002,6 +1076,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     1500L
                 }
 
+                var effectiveRangeStartSec = _analysisRangeStartSec.value.coerceIn(0L, totalSeconds)
+                val configuredRangeEndSec = _analysisRangeEndSec.value
+                var effectiveRangeEndSec = if (configuredRangeEndSec <= 0L || configuredRangeEndSec > totalSeconds) {
+                    totalSeconds
+                } else {
+                    configuredRangeEndSec
+                }
+                var repeatedSceneMatches: List<RepeatedSceneMatch> = emptyList()
+
+                // Local-only OP/ED matching is applied to new analyses only; saved resume plans stay unchanged.
+                if (existingEntity == null) {
+                    val sourceAnalysisId = _selectedSeriesSourceId.value
+                    if (sourceAnalysisId != null) {
+                        try {
+                            _analysisState.value = AnalysisState.Preparing("Mencari OP/ED yang berulang di seri secara lokal...")
+                            val sourceEntity = repository.getAnalysisById(sourceAnalysisId)
+                            var template = openingEndingStorage.get(sourceAnalysisId)
+                            if (template == null && sourceEntity != null && sourceEntity.videoUriString != video.uri.toString()) {
+                                val sourceDuration = (sourceEntity.durationMs / 1000L).coerceAtLeast(1L)
+                                template = OpeningEndingDetector.capture(
+                                    context,
+                                    Uri.parse(sourceEntity.videoUriString),
+                                    sourceDuration
+                                )
+                                if (template != null) openingEndingStorage.save(sourceAnalysisId, template!!)
+                            }
+
+                            val currentFingerprint = OpeningEndingDetector.capture(context, video.uri, totalSeconds)
+                            if (template != null && currentFingerprint != null) {
+                                val skips = OpeningEndingDetector.findSkips(template!!, currentFingerprint, totalSeconds)
+                                val adjustedStart = maxOf(effectiveRangeStartSec, skips.openingEndSec ?: effectiveRangeStartSec)
+                                val adjustedEnd = minOf(effectiveRangeEndSec, skips.endingStartSec ?: effectiveRangeEndSec)
+                                if (adjustedEnd - adjustedStart >= SegmentCalculator.MIN_RANGE_SECONDS) {
+                                    effectiveRangeStartSec = adjustedStart
+                                    effectiveRangeEndSec = adjustedEnd
+                                    _analysisRangeStartSec.value = adjustedStart
+                                    _analysisRangeEndSec.value = adjustedEnd
+                                    Log.i(TAG, "OP/ED berulang terdeteksi secara lokal; rentang analisis disetel ke ${formatSeconds(adjustedStart)}-${formatSeconds(adjustedEnd)}")
+                                }
+                            } else if (template == null && currentFingerprint != null) {
+                                // If the source file is no longer readable, use this episode as the local template.
+                                openingEndingStorage.save(sourceAnalysisId, currentFingerprint)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Deteksi OP/ED lokal dilewati; analisis memakai rentang semula: ${e.message}")
+                        }
+                    }
+                }
+
+                if (existingEntity == null) {
+                    try {
+                        _analysisState.value = AnalysisState.Preparing("Mencari adegan berulang secara lokal...")
+                        repeatedSceneMatches = RepeatedSceneDetector.detect(
+                            context = context,
+                            uri = video.uri,
+                            startSec = effectiveRangeStartSec,
+                            endSec = effectiveRangeEndSec
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Deteksi adegan berulang dilewati; analisis tetap dilanjutkan: ${e.message}")
+                    }
+                }
+
                 // 2. Tentukan Rencana Segmen:
                 // - Jika melanjutkan analisis dari database, PAKAI RENCANA TERSIMPAN (jangan hitung ulang!)
                 // - Jika analisis baru, hitung berdasarkan durasi asli dan opsi panjang segmen terpilih
@@ -1038,6 +1179,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val allTimeline = mutableListOf<TimelineItem>()
                 val segmentSummaries = mutableListOf<String>()
                 val segmentModels = mutableListOf<String>()
+                val continuityWarnings = mutableListOf<String>().apply {
+                    activeEntityId?.let { addAll(continuityWarningStorage.get(it)) }
+                }
                 var startIndex = 0
 
                 val activeStyle: VisualStyle = if (existingEntity != null) {
@@ -1112,6 +1256,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     activeEntityId = repository.insert(newEntity)
                     activeAnalysisId = activeEntityId
+                    if (repeatedSceneMatches.isNotEmpty()) {
+                        repeatedSceneStorage.save(activeEntityId, repeatedSceneMatches.map { it.toUserMessage() })
+                    }
                     visualStyleStorage.saveStyleForAnalysis(activeEntityId, activeStyle)
                     narrationModeStorage.saveModeForAnalysis(activeEntityId, activeMode)
                     promptCutModeStorage.saveModeForAnalysis(activeEntityId, activeCutMode, activeMaxSceneDur)
@@ -1134,6 +1281,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _selectedSeriesSourceId.value = sourceAnalysisId
                         activeSeriesBible = seriesBibleStorage.getBible(sourceAnalysisId)
                         if (activeSeriesBible != null) {
+                            if (seriesBibleStorage.getBible(activeEntityId) == null) {
+                                seriesBibleStorage.saveBible(activeEntityId, activeSeriesBible!!)
+                            }
                             Log.i(TAG, "Memori seri dimuat dari analisis sumber ID $sourceAnalysisId untuk analisis ID $activeEntityId: ${activeSeriesBible.locations.size} lokasi, ${activeSeriesBible.glossary.size} istilah")
                         }
                         if (allCharacterSheet.isEmpty()) {
@@ -1471,6 +1621,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         try {
                             val activeLanguage = narrationLanguageStorage.getLanguage()
                             val effectiveInterval = if (activeCutMode == PromptCutMode.PER_SCENE) 0 else _promptIntervalSeconds.value
+                            val speechActivityHints = if (activeMode == NarrationMode.DIALOG_KONTEN) {
+                                _analysisState.value = AnalysisState.AnalyzingSegment(
+                                    currentSegment = i + 1,
+                                    totalSegments = totalSegments,
+                                    timeRange = timeRange,
+                                    message = "Menganalisis bagian suara lokal...",
+                                    modelName = activeModel
+                                )
+                                val speechSpans = AudioActivityDetector.detect(
+                                    context = context,
+                                    uri = video.uri,
+                                    startSec = startSec,
+                                    endSec = endSec
+                                )
+                                if (speechSpans.isEmpty()) "" else "Voice-like activity detected around: " +
+                                    speechSpans.joinToString(", ") { "${formatSeconds(it.startSec)}-${formatSeconds(it.endSec)}" } +
+                                    ". Other intervals may be quiet or contain only non-voice audio."
+                            } else ""
                             val segmentOutput = geminiClient.analyzeSegment(
                                 currentSegment = i + 1,
                                 totalSegments = totalSegments,
@@ -1487,6 +1655,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 language = activeLanguage,
                                 exactSceneSpans = exactScenes,
                                 seriesBible = activeSeriesBible,
+                                speechActivityHints = speechActivityHints,
                                 onStatusUpdate = { statusMsg ->
                                     _analysisState.value = AnalysisState.AnalyzingSegment(
                                         currentSegment = i + 1,
@@ -1497,6 +1666,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     )
                                 }
                             )
+
+                            val continuityIssues = CharacterContinuityChecker.findContradictions(
+                                previous = allCharacterSheet,
+                                current = segmentOutput.characterSheet
+                            )
+                            if (continuityIssues.isNotEmpty()) {
+                                continuityWarnings.addAll(continuityIssues)
+                                activeEntityId?.let { continuityWarningStorage.save(it, continuityWarnings) }
+                                Log.w(TAG, "Pemeriksa kontinuitas karakter: ${continuityIssues.joinToString()}")
+                            }
 
                             segmentSummaries.add(segmentOutput.segmentSummary)
                             segmentModels.add(activeModel)
@@ -1646,6 +1825,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val currentBible = (activeEntityId?.let { seriesBibleStorage.getBible(it) }) ?: activeSeriesBible
+                val repeatedSceneNotes = activeEntityId?.let { repeatedSceneStorage.get(it) }.orEmpty()
+                    .ifEmpty { repeatedSceneMatches.map { it.toUserMessage() } }
+                val analysisNotes = mutableListOf<String>()
+                continuityWarnings.distinct().takeIf { it.isNotEmpty() }?.let { warnings ->
+                    analysisNotes += "Pemeriksa kontinuitas karakter menemukan perbedaan yang perlu ditinjau:\n- ${warnings.joinToString("\n- ")}"
+                }
+                repeatedSceneNotes.takeIf { it.isNotEmpty() }?.let { notes ->
+                    analysisNotes += "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- ${notes.joinToString("\n- ")}"
+                }
                 val finalResult = AnimeAnalysisResult(
                     narration = narration,
                     characterSheet = allCharacterSheet,
@@ -1654,6 +1842,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     durationFormatted = formatSeconds(totalSeconds),
                     intervalSeconds = if (activeCutMode == PromptCutMode.PER_SCENE) 0 else _promptIntervalSeconds.value,
                     videoName = video.displayName,
+                    note = analysisNotes.joinToString("\n\n"),
                     segmentModels = segmentModels,
                     segmentSummaries = segmentSummaries,
                     narrationMode = activeMode.displayName,
@@ -1683,6 +1872,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                             if (updatedBible != null && !updatedBible.isEmpty()) {
                                 seriesBibleStorage.saveBible(finalActiveEntityId, updatedBible)
+                                _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value - finalActiveEntityId
                                 Log.i(TAG, "Memori seri untuk analisis ID $finalActiveEntityId berhasil disimpan: ${updatedBible.locations.size} lokasi, ${updatedBible.glossary.size} istilah, ${updatedBible.relationships.size} relasi, ${updatedBible.episodes.size} episode.")
                                 val currentState = _analysisState.value
                                 if (currentState is AnalysisState.Success) {
@@ -1690,9 +1880,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                         result = currentState.result.copy(seriesBible = updatedBible)
                                     )
                                 }
+                            } else {
+                                Log.w(TAG, "Pembaruan otomatis Memori Seri mengembalikan hasil kosong/null untuk analisis $finalActiveEntityId")
+                                recordSeriesBibleBuildFailure(finalActiveEntityId)
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.message}")
+                            recordSeriesBibleBuildFailure(finalActiveEntityId)
                         }
                     }
                 }

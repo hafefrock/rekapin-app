@@ -156,6 +156,9 @@ fun HomeScreen(
     val detectedSceneCount by viewModel.detectedSceneCount.collectAsState()
     val isAutoBuildSeriesBible by viewModel.isAutoBuildSeriesBible.collectAsState()
     val isPrependRecapNarration by viewModel.isPrependRecapNarration.collectAsState()
+    val failedSeriesBibleBuildIds by viewModel.failedSeriesBibleBuildIds.collectAsState()
+    val seriesBibleBuildFailureNotice by viewModel.seriesBibleBuildFailureNotice.collectAsState()
+    val seriesBibleBuildInProgressId by viewModel.seriesBibleBuildInProgressId.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -237,6 +240,8 @@ fun HomeScreen(
             languageName = narrationLanguage.displayName,
             maxSceneDuration = viewModel.getMaxDurationForAnalysis(historyEntity.id),
             seriesBible = viewModel.getSeriesBibleForAnalysis(historyEntity.id),
+            continuityWarnings = viewModel.getContinuityWarningsForAnalysis(historyEntity.id),
+            repeatedSceneNotes = viewModel.getRepeatedSceneNotesForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
                 requestNotificationAndStart {
@@ -267,6 +272,9 @@ fun HomeScreen(
                 viewModel.closeHistory()
             },
             getMaxDurationForAnalysis = { viewModel.getMaxDurationForAnalysis(it) },
+            failedSeriesBibleBuildIds = failedSeriesBibleBuildIds,
+            seriesBibleBuildInProgressId = seriesBibleBuildInProgressId,
+            onBuildSeriesBibleNow = { viewModel.buildSeriesBibleNow(it) },
             onFinishWithoutCurrentSegment = { resumeId ->
                 viewModel.finishWithoutCurrentSegment(resumeId)
                 viewModel.closeHistory()
@@ -606,6 +614,34 @@ fun HomeScreen(
                         modifier = Modifier.testTag("btn_fresh_matched_dialog")
                     ) {
                         Text("Mulai Baru")
+                    }
+                }
+            )
+        }
+
+        seriesBibleBuildFailureNotice?.let { analysisId ->
+            val failedVideoName = historyList.firstOrNull { it.id == analysisId }?.videoName.orEmpty()
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissSeriesBibleBuildFailureNotice() },
+                title = { Text("Memori Seri belum diperbarui", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "Pembaruan Memori Seri${if (failedVideoName.isNotBlank()) " untuk \"$failedVideoName\"" else ""} gagal. Anda dapat mencoba membangunnya sekarang; ini memakai satu permintaan Gemini tambahan.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.dismissSeriesBibleBuildFailureNotice()
+                            viewModel.buildSeriesBibleNow(analysisId)
+                        },
+                        enabled = seriesBibleBuildInProgressId == null
+                    ) { Text("Bangun memori seri sekarang") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { viewModel.dismissSeriesBibleBuildFailureNotice() }) {
+                        Text("Nanti")
                     }
                 }
             )

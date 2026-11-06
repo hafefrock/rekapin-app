@@ -76,7 +76,10 @@ fun HistoryScreen(
     onResumeAnalysis: (Long) -> Unit,
     onFinishWithoutCurrentSegment: ((Long) -> Unit)? = null,
     onMergeNarrationsWithAi: (suspend (parts: List<Pair<String, String>>, onStatus: (String) -> Unit) -> String)? = null,
-    getMaxDurationForAnalysis: ((Long) -> Int)? = null
+    getMaxDurationForAnalysis: ((Long) -> Int)? = null,
+    failedSeriesBibleBuildIds: Set<Long> = emptySet(),
+    seriesBibleBuildInProgressId: Long? = null,
+    onBuildSeriesBibleNow: ((Long) -> Unit)? = null
 ) {
     // Mode pilih banyak
     var isSelectMode by remember { mutableStateOf(false) }
@@ -276,7 +279,10 @@ fun HistoryScreen(
                             },
                             onDelete = { itemToDelete = entity },
                             onResume = { onResumeAnalysis(entity.id) },
-                            maxSceneDuration = getMaxDurationForAnalysis?.invoke(entity.id) ?: 5
+                            maxSceneDuration = getMaxDurationForAnalysis?.invoke(entity.id) ?: 5,
+                            seriesBibleBuildFailed = failedSeriesBibleBuildIds.contains(entity.id),
+                            isBuildingSeriesBible = seriesBibleBuildInProgressId == entity.id,
+                            onBuildSeriesBibleNow = { onBuildSeriesBibleNow?.invoke(entity.id) }
                         )
                     }
                 }
@@ -354,7 +360,10 @@ private fun HistoryItemCard(
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onResume: () -> Unit,
-    maxSceneDuration: Int = 5
+    maxSceneDuration: Int = 5,
+    seriesBibleBuildFailed: Boolean = false,
+    isBuildingSeriesBible: Boolean = false,
+    onBuildSeriesBibleNow: () -> Unit = {}
 ) {
     val isEnabled = !isSelectMode || entity.isCompleted
     val alpha = if (isSelectMode && !entity.isCompleted) 0.38f else 1f
@@ -526,6 +535,30 @@ private fun HistoryItemCard(
                     }
                 }
             }
+
+            if (entity.isCompleted && seriesBibleBuildFailed && !isSelectMode) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Memori seri belum berhasil diperbarui.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = onBuildSeriesBibleNow,
+                    enabled = !isBuildingSeriesBible,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .height(38.dp)
+                        .testTag("btn_build_series_bible_${entity.id}")
+                ) {
+                    Text(
+                        text = if (isBuildingSeriesBible) "Sedang membangun..." else "Bangun memori seri sekarang",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -539,6 +572,8 @@ fun HistoryDetailScreen(
     languageName: String = "",
     maxSceneDuration: Int = 5,
     seriesBible: com.example.data.model.SeriesBible? = null,
+    continuityWarnings: List<String> = emptyList(),
+    repeatedSceneNotes: List<String> = emptyList(),
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -627,7 +662,20 @@ fun HistoryDetailScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            val result = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration, seriesBible = seriesBible)
+            val baseResult = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration, seriesBible = seriesBible)
+            val continuityNote = continuityWarnings.takeIf { it.isNotEmpty() }?.joinToString(
+                separator = "\n",
+                prefix = "Pemeriksa kontinuitas karakter menemukan perbedaan yang perlu ditinjau:\n- ",
+                transform = { it }
+            )?.replace("\n", "\n- ") ?: ""
+            val repeatedSceneNote = repeatedSceneNotes.takeIf { it.isNotEmpty() }?.joinToString(
+                separator = "\n",
+                prefix = "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- "
+            )?.replace("\n", "\n- ") ?: ""
+            val combinedNote = listOf(baseResult.note, continuityNote, repeatedSceneNote)
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+            val result = baseResult.copy(note = combinedNote)
             ResultView(
                 result = result,
                 styleName = styleName,

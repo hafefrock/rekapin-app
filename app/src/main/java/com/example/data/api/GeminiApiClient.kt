@@ -3,7 +3,6 @@ package com.example.data.api
 import android.content.Context
 import android.util.Log
 import com.example.data.model.CharacterInfo
-import com.example.data.model.BibleEpisode
 import com.example.data.model.SeriesBible
 import com.example.data.prefs.SeriesBibleStorage
 import com.example.data.model.NarrationLanguage
@@ -385,6 +384,7 @@ class GeminiApiClient(
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
         exactSceneSpans: List<String> = emptyList(),
         seriesBible: SeriesBible? = null,
+        speechActivityHints: String = "",
         onStatusUpdate: (String) -> Unit
     ): SegmentAnalysisOutput = withContext(Dispatchers.IO) {
         val startFormatted = formatTimeSeconds(startSec)
@@ -407,7 +407,8 @@ class GeminiApiClient(
             mode = mode,
             language = language,
             exactSceneSpans = exactSceneSpans,
-            seriesBible = seriesBible
+            seriesBible = seriesBible,
+            speechActivityHints = speechActivityHints
         )
 
         val requestPayload = JSONObject().apply {
@@ -900,10 +901,9 @@ class GeminiApiClient(
                         val textJson = JSONObject(cleaned.trim())
                         val episodeRecap = textJson.optString("episodeRecap", "").trim().take(SeriesBible.MAX_EPISODE_RECAP_CHARS)
 
-                        val existingEpisodes = previousBible?.episodes ?: emptyList()
-                        val newEpisodes = existingEpisodes + BibleEpisode(videoName, episodeRecap)
-
-                        val finalBible = parsedBible.copy(episodes = newEpisodes).trimToLimits()
+                        val finalBible = parsedBible
+                            .copy(episodes = previousBible?.episodes.orEmpty())
+                            .withUpdatedEpisode(videoName, episodeRecap)
                         Log.i(TAG, "[$stageName] Memori seri berhasil diperbarui (${finalBible.locations.size} lokasi, ${finalBible.glossary.size} istilah, ${finalBible.relationships.size} relasi, ${finalBible.episodes.size} episode)")
                         return@withContext finalBible
                     }
@@ -1069,7 +1069,8 @@ class GeminiApiClient(
         mode: NarrationMode = NarrationMode.REKAP_VOICEOVER,
         language: NarrationLanguage = NarrationLanguage.ENGLISH_USA,
         exactSceneSpans: List<String> = emptyList(),
-        seriesBible: SeriesBible? = null
+        seriesBible: SeriesBible? = null,
+        speechActivityHints: String = ""
     ): String {
         val sampleTimestamps = if (isFirstSegment) {
             "00:00 - 00:05, 00:05 - 00:10"
@@ -1158,6 +1159,14 @@ $listFormatted
 
         val targetLanguage = if (language == NarrationLanguage.INDONESIAN) "Indonesian" else "American English"
 
+        val speechActivityBlock = if (mode == NarrationMode.DIALOG_KONTEN && speechActivityHints.isNotBlank()) {
+            """
+            LOCAL AUDIO ACTIVITY HINT (approximate, not a transcript):
+            $speechActivityHints
+            Use this only to focus dialogue listening. Confirm whether the sound is actually character speech in the video; music/noise may be misclassified. Never invent dialogue, and keep the dialogue field empty where no speech is audible.
+            """.trimIndent()
+        } else ""
+
         val transcriptInstruction = when (language) {
             NarrationLanguage.ORIGINAL -> {
                 "Transcribe exactly what is spoken, in the ORIGINAL spoken language of the audio. Do NOT translate. Keep it faithful and do not invent lines. If the language is unclear, use the language that is most clearly heard."
@@ -1175,7 +1184,7 @@ $listFormatted
                 {
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
-                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
+                  "visualPrompt": "$stylePrompt. [Subject: name and exact established appearance], [Action: specific physical movement or stance], [Camera: framing, angle, and focus], [Lighting: source, direction, shadows, and highlights], [Mood: emotional atmosphere], [Background: environment, architecture, and relevant details], [Expression: visible facial emotion].",
                   "dialogue": "Spoken lines of characters heard in this time window, formatted as 'Speaker: line' joined by ' / '. Use the character names from the character sheet, or 'Unknown' if the speaker cannot be identified. Use an empty string if nobody speaks. $transcriptInstruction"
                 }
             """.trimIndent()
@@ -1183,7 +1192,7 @@ $listFormatted
                 {
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
-                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere].",
+                  "visualPrompt": "$stylePrompt. [Subject: name and exact established appearance], [Action: specific physical movement or stance], [Camera: framing, angle, and focus], [Lighting: source, direction, shadows, and highlights], [Mood: emotional atmosphere], [Background: environment, architecture, and relevant details], [Expression: visible facial emotion].",
                   "originalNarration": "Only the off-screen narrator's voice-over heard in this time window, not character dialogue. Use an empty string if there is no narrator. $transcriptInstruction"
                 }
             """.trimIndent()
@@ -1191,7 +1200,7 @@ $listFormatted
                 {
                   "timestamp": "MM:SS - MM:SS",
                   "sceneDescription": "Short, vivid description of the scene in natural American English.",
-                  "visualPrompt": "$stylePrompt. [Subject: Name and repeat their exact visual attributes from character sheet], [Action: specific physical movement or stance], [Expression: emotional face details], [Setting: environment, architecture, background], [Lighting: lighting source, shadows, highlights], [Camera: shot framing and angle], [Mood: emotional atmosphere]."
+                  "visualPrompt": "$stylePrompt. [Subject: name and exact established appearance], [Action: specific physical movement or stance], [Camera: framing, angle, and focus], [Lighting: source, direction, shadows, and highlights], [Mood: emotional atmosphere], [Background: environment, architecture, and relevant details], [Expression: visible facial emotion]."
                 }
             """.trimIndent()
         }
@@ -1230,6 +1239,8 @@ $listFormatted
             $timestampsBlock
             
             $languageBlock
+
+            ${if (speechActivityBlock.isNotBlank()) "$speechActivityBlock\n\n            " else ""}
             
             ${if (seriesBibleBlock.isNotBlank()) "$seriesBibleBlock\n\n            " else ""}$characterContext
             
@@ -1251,7 +1262,7 @@ $timelineItemSchema
             CRITICAL VISUAL PROMPT RULES:
             1. Every visualPrompt MUST strictly start with: "$stylePrompt". Follow only the selected style; do not mix other styles.
             2. Repeat the character's exact physical descriptions from the character sheet inside each visual prompt so text-to-image models maintain character consistency across shots.
-            3. Each visual prompt must be exactly one descriptive paragraph covering: subject, action, expression, setting, lighting, camera angle, mood.
+            3. Every visual prompt must be one paragraph in this order, with every labeled part present: [Subject], [Action], [Camera], [Lighting], [Mood], [Background]. Add [Expression] when a face is visible. Repeat stable physical appearance in [Subject] and keep it consistent with the character sheet.
             4. Do NOT mention any animation studio names or artist names.
         """.trimIndent()
     }
