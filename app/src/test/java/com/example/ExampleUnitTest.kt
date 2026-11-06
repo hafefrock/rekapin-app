@@ -17,7 +17,7 @@ import java.util.Locale
 import kotlin.math.ceil
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 class ExampleUnitTest {
 
     @Test
