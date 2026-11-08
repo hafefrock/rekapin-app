@@ -148,20 +148,26 @@ fun SettingsDialog(
         containerColor = MaterialTheme.colorScheme.surface,
         titleContentColor = MaterialTheme.colorScheme.onSurface,
         title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Pengaturan",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 Text(
-                    text = "Pengaturan",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "Atur akses Gemini dan preferensi analisis.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 34.dp)
                 )
             }
         },
@@ -175,7 +181,7 @@ fun SettingsDialog(
                 ScrollableTabRow(
                     selectedTabIndex = selectedTab,
                     edgePadding = 0.dp,
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     contentColor = MaterialTheme.colorScheme.primary,
                     indicator = { tabPositions ->
                         TabRowDefaults.SecondaryIndicator(
@@ -184,7 +190,9 @@ fun SettingsDialog(
                             height = 2.5.dp
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
                 ) {
                     Tab(
                         selected = selectedTab == 0,
@@ -198,7 +206,7 @@ fun SettingsDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "API Key (${apiKeys.size})",
+                                    text = "Kunci API (${apiKeys.size})",
                                     fontSize = 12.sp,
                                     fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -258,7 +266,7 @@ fun SettingsDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Gaya Visual (${visualStyles.size})",
+                                    text = "Gaya (${visualStyles.size})",
                                     fontSize = 12.sp,
                                     fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -278,7 +286,7 @@ fun SettingsDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Memori Seri",
+                                    text = "Seri",
                                     fontSize = 12.sp,
                                     fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Normal
                                 )
