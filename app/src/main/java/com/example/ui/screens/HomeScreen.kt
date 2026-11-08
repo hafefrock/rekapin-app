@@ -325,9 +325,9 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Analisis Anime AI • $selectedModel",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.primary
+                                text = "Studio rekap anime",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -768,9 +768,35 @@ private fun IdleSetupContent(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp, bottom = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = "RUANG KERJA",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.4.sp
+            )
+            Text(
+                text = "Mulai rekap baru",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = "Pilih video, atur analisis, lalu siapkan cerita.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         // Banner Lanjutkan Analisis Tertunda jika ada yang belum selesai
         if (pendingAnalysis != null) {
             Card(
