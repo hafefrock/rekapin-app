@@ -235,8 +235,7 @@ class AnalysisForegroundService : Service() {
         const val NOTIFICATION_ID_FAILED = 1003
         const val NOTIFICATION_ID_QUOTA_EXCEEDED = 1004
 
-        const val ACTION_START = "com.example.service.ACTION_START"
-        const val ACTION_UPDATE = "com.example.service.ACTION_UPDATE"
+        const val ACTION_SHOW = "com.example.service.ACTION_SHOW"
         const val ACTION_STOP = "com.example.service.ACTION_STOP"
         const val ACTION_CANCEL = "com.example.service.ACTION_CANCEL"
 
@@ -256,7 +255,7 @@ class AnalysisForegroundService : Service() {
             message: String = "Sedang menyiapkan video..."
         ) {
             val intent = Intent(context, AnalysisForegroundService::class.java).apply {
-                action = ACTION_START
+                action = ACTION_SHOW
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_MODEL, model)
@@ -294,7 +293,7 @@ class AnalysisForegroundService : Service() {
                 }
             }
             val intent = Intent(context, AnalysisForegroundService::class.java).apply {
-                action = ACTION_UPDATE
+                action = ACTION_SHOW
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_MODEL, model)
@@ -332,7 +331,7 @@ class AnalysisForegroundService : Service() {
                 }
             }
             val intent = Intent(context, AnalysisForegroundService::class.java).apply {
-                action = ACTION_UPDATE
+                action = ACTION_SHOW
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_MODEL, model)

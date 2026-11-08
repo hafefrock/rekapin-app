@@ -9,7 +9,8 @@ class GeminiApiException(
     val retryDelaySeconds: Long? = null,
     val isFileProcessingTimeout: Boolean = false,
     val isFileProcessingFailed: Boolean = false,
-    cause: Throwable? = null
+    cause: Throwable? = null,
+    val modelName: String = ""
 ) : Exception(userFriendlyMessage, cause) {
 
     fun toErrorReport(): String {
@@ -19,7 +20,7 @@ class GeminiApiException(
             if (httpCode != null) {
                 appendLine("Kode HTTP: $httpCode")
             }
-            appendLine("Model: ${GeminiConstants.GEMINI_MODEL}")
+            appendLine("Model: ${modelName.ifBlank { GeminiConstants.GEMINI_MODEL }}")
             appendLine("Pesan: $userFriendlyMessage")
             appendLine("\nDetail Pesan API:")
             appendLine(rawMessage)

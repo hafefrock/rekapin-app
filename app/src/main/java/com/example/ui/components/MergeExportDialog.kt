@@ -356,7 +356,7 @@ fun MergeExportDialog(
                                             }
                                         },
                                         enabled = (index > 0),
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(48.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowUpward,
@@ -374,7 +374,7 @@ fun MergeExportDialog(
                                             }
                                         },
                                         enabled = (index < orderedEntities.size - 1),
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(48.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowDownward,

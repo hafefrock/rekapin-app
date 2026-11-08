@@ -12,8 +12,8 @@ data class QuotaCheckResult(
 object QuotaHelper {
 
     /**
-     * Memeriksa apakah respons HTTP 429 memuat kuota harian ("PerDay")
-     * atau memiliki retryDelay lebih dari 5 menit (300 detik).
+     * Memeriksa kuota harian dari nama metrik/pesan PerDay; retry delay panjang
+     * sendiri bukan bukti bahwa kuota harian telah habis.
      */
     fun checkQuotaError(statusCode: Int, responseBody: String): QuotaCheckResult {
         if (statusCode != 429) {
@@ -31,13 +31,12 @@ object QuotaHelper {
                 responseBody.contains("per day", ignoreCase = true)
 
         val retryDelaySeconds = extractRetryDelaySeconds(responseBody)
-        // Batas 5 menit = 300 detik
-        val isDelayOver5Min = retryDelaySeconds != null && retryDelaySeconds > 300L
-
-        val isDaily = hasPerDay || isDelayOver5Min
+        val isDaily = hasPerDay
         val formattedTime = formatWaitTimeHoursAndMinutes(retryDelaySeconds)
         val userMsg = if (isDaily) {
             "Kuota harian habis. Coba lagi sekitar $formattedTime"
+        } else if (retryDelaySeconds != null && retryDelaySeconds > MAX_AUTOMATIC_RETRY_WAIT_SECONDS) {
+            "Batas permintaan sedang aktif. Coba lagi sekitar $formattedTime."
         } else {
             "Batas kuota per menit Gemini terlampaui (HTTP 429)."
         }
@@ -91,6 +90,8 @@ object QuotaHelper {
 
         return null
     }
+
+    const val MAX_AUTOMATIC_RETRY_WAIT_SECONDS = 300L
 
     private fun parseSecondsString(raw: String): Long? {
         val cleaned = raw.trim().removeSuffix("s").trim()

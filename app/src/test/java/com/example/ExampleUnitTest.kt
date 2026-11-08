@@ -8,6 +8,7 @@ import com.example.data.model.CharacterInfo
 import com.example.data.model.TimelineItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -277,6 +278,52 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testRequestEstimateMatchesNarrationAndSeriesFeatures() {
+        assertEquals(5, com.example.util.SegmentCalculator.estimateGeminiRequestCount(5, false, false))
+        assertEquals(6, com.example.util.SegmentCalculator.estimateGeminiRequestCount(5, true, false))
+        assertEquals(7, com.example.util.SegmentCalculator.estimateGeminiRequestCount(5, true, true))
+        assertEquals(Int.MAX_VALUE, com.example.util.SegmentCalculator.estimateGeminiRequestCount(Int.MAX_VALUE, true, true))
+    }
+
+    @Test
+    fun testSegmentRangeAtOrBeyondVideoEndIsNormalizedSafely() {
+        val atEnd = com.example.util.SegmentCalculator.calculateSegments(
+            totalSeconds = 100L,
+            rangeStartSec = 100L,
+            rangeEndSec = 100L
+        )
+        assertEquals(99L, atEnd.single().startSec)
+        assertEquals(100L, atEnd.single().endSec)
+
+        val beyondEnd = com.example.util.SegmentCalculator.calculatePlanSummary(
+            totalSeconds = 100L,
+            rangeStartSec = 120L,
+            rangeEndSec = 150L
+        )
+        assertEquals(99L, beyondEnd.rangeStartSec)
+        assertEquals(100L, beyondEnd.rangeEndSec)
+        assertEquals(1, beyondEnd.segmentCount)
+    }
+
+    @Test
+    fun testResumePolicySkipsSegmentsWhenAllCheckpointsAreComplete() {
+        val policy = com.example.data.model.AnalysisResumePolicy
+        assertEquals(3, policy.restoredSegmentIndex(3, 8))
+        assertEquals(8, policy.restoredSegmentIndex(8, 8))
+        assertEquals(8, policy.restoredSegmentIndex(12, 8))
+        assertTrue(policy.shouldAnalyzeSegments(3, 8))
+        assertTrue(!policy.shouldAnalyzeSegments(8, 8))
+        assertTrue(!policy.shouldAnalyzeSegments(0, 0))
+    }
+
+    @Test
+    fun testParseTimeSecondsRejectsLongOverflow() {
+        assertNull(com.example.util.SegmentCalculator.parseTimeSeconds("9223372036854775807:59"))
+        assertNull(com.example.util.SegmentCalculator.parseTimeSeconds("2562047788015215:30:00"))
+        assertEquals(3661L, com.example.util.SegmentCalculator.parseTimeSeconds("1:01:01"))
+    }
+
+    @Test
     fun testVideoMatchingTolerance() {
         fun matches(savedDurationMs: Long, savedSize: Long, newDurationMs: Long, newSize: Long): Boolean {
             val durationDiffMs = kotlin.math.abs(savedDurationMs - newDurationMs)
@@ -333,7 +380,7 @@ class ExampleUnitTest {
 
     @Test
     fun testQuotaHelperRetryDelayOver5MinWithoutPerDay() {
-        // Error 429 tanpa kata PerDay, tetapi retryDelay > 5 menit (e.g. 600s = 10 menit)
+        // Retry delay panjang tidak otomatis berarti kuota harian tanpa indikator PerDay.
         val errorJson = """
             {
               "error": {
@@ -350,9 +397,9 @@ class ExampleUnitTest {
         """.trimIndent()
 
         val result = com.example.util.QuotaHelper.checkQuotaError(429, errorJson)
-        assertTrue(result.isDailyQuota)
+        assertTrue(!result.isDailyQuota)
         assertEquals(600L, result.retryDelaySeconds)
-        assertEquals("Kuota harian habis. Coba lagi sekitar 10 menit", result.userMessage)
+        assertEquals("Batas permintaan sedang aktif. Coba lagi sekitar 10 menit.", result.userMessage)
     }
 
     @Test
@@ -416,6 +463,19 @@ class ExampleUnitTest {
         assertEquals(2, error.completedSummaries.size)
         assertEquals(3, error.resumeSegment)
         assertEquals("Kuota harian habis. Coba lagi sekitar 2 jam 15 menit", error.errorMessage)
+    }
+
+    @Test
+    fun testGeminiErrorReportUsesActualModelWhenAvailable() {
+        val error = com.example.data.api.GeminiApiException(
+            stage = "Analisis segmen",
+            httpCode = 429,
+            rawMessage = "rate limited",
+            userFriendlyMessage = "Batas permintaan",
+            modelName = "gemini-2.5-flash"
+        )
+
+        assertTrue(error.toErrorReport().contains("Model: gemini-2.5-flash"))
     }
 
     @Test
@@ -1493,6 +1553,23 @@ class ExampleUnitTest {
         val match = com.example.util.OpeningEndingDetector.longestOrderedRun(template, current)
 
         assertEquals(1 to 8, match)
+    }
+
+    @Test
+    fun testOpeningEndingFingerprintDoesNotBridgeUnmatchedCurrentFrame() {
+        val random = java.util.Random(912L)
+        val template = (0 until 10).map { index ->
+            com.example.util.FrameFingerprint(index * 3L, random.nextLong())
+        }
+        val unrelatedHash = Long.MIN_VALUE
+        assertTrue(template.none { java.lang.Long.bitCount(it.hash xor unrelatedHash) <= 9 })
+        val current = template.take(4) +
+            com.example.util.FrameFingerprint(12L, unrelatedHash) +
+            template.drop(4).mapIndexed { index, frame -> frame.copy(timeSec = (15 + index * 3).toLong()) }
+
+        val match = com.example.util.OpeningEndingDetector.longestOrderedRun(template, current)
+
+        assertEquals(5 to 10, match)
     }
 
     @Test

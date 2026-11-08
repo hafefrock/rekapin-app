@@ -114,23 +114,29 @@ object OpeningEndingDetector {
         }
     }
 
-    /** Pure helper kept internal-facing for regression tests of tolerance and ordering. */
+    /** Pure helper requires consecutive current frames and increasing template order. */
     internal fun longestOrderedRun(
         template: List<FrameFingerprint>,
         current: List<FrameFingerprint>
     ): Pair<Int, Int>? {
         if (template.isEmpty() || current.isEmpty()) return null
-        var previous = IntArray(template.size + 1)
+        var previous = IntArray(template.size)
         var bestLength = 0
         var bestCurrentEnd = -1
         for (currentIndex in current.indices) {
-            val next = IntArray(template.size + 1)
+            val next = IntArray(template.size)
+            var bestEarlierTemplateRun = 0
+            val hasContiguousPreviousFrame = currentIndex > 0 &&
+                current[currentIndex].timeSec - current[currentIndex - 1].timeSec == SAMPLE_STEP_SECONDS
             for (templateIndex in template.indices) {
+                if (hasContiguousPreviousFrame && templateIndex > 0) {
+                    bestEarlierTemplateRun = maxOf(bestEarlierTemplateRun, previous[templateIndex - 1])
+                }
                 val distance = java.lang.Long.bitCount(template[templateIndex].hash xor current[currentIndex].hash)
                 if (distance <= MAX_HASH_DISTANCE) {
-                    next[templateIndex + 1] = previous[templateIndex] + 1
-                    if (next[templateIndex + 1] > bestLength) {
-                        bestLength = next[templateIndex + 1]
+                    next[templateIndex] = bestEarlierTemplateRun + 1
+                    if (next[templateIndex] > bestLength) {
+                        bestLength = next[templateIndex]
                         bestCurrentEnd = currentIndex
                     }
                 }

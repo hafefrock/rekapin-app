@@ -32,6 +32,10 @@ class OpeningEndingStorage(context: Context) {
         prefs.edit().putString(analysisId.toString(), root.toString()).apply()
     }
 
+    fun remove(analysisId: Long) {
+        prefs.edit().remove(analysisId.toString()).apply()
+    }
+
     private fun writeFrames(frames: List<FrameFingerprint>): JSONArray = JSONArray().apply {
         frames.forEach { frame ->
             put(JSONObject().apply {

@@ -518,6 +518,8 @@ fun HomeScreen(
                         onMaxSceneDurationChanged = { viewModel.setMaxSceneDuration(it) },
                         segmentDurationOption = segmentDurationOption,
                         segmentPlanSummary = segmentPlanSummary,
+                        narrationMode = narrationMode,
+                        isAutoBuildSeriesBible = isAutoBuildSeriesBible,
                         historyList = historyList,
                         models = models,
                         selectedModel = selectedModel,
@@ -729,6 +731,8 @@ private fun IdleSetupContent(
     onMaxSceneDurationChanged: (Int) -> Unit,
     segmentDurationOption: SegmentDurationOption,
     segmentPlanSummary: SegmentPlanSummary?,
+    narrationMode: com.example.data.model.NarrationMode,
+    isAutoBuildSeriesBible: Boolean,
     historyList: List<AnimeAnalysisEntity>,
     models: List<String>,
     selectedModel: String,
@@ -2590,22 +2594,33 @@ private fun IdleSetupContent(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     // 5. Jumlah permintaan (segmen + 1 narasi)
+                    val requestBreakdown = buildList {
+                        add("${segmentPlanSummary.segmentCount} segmen")
+                        if (narrationMode == com.example.data.model.NarrationMode.REKAP_VOICEOVER) add("1 narasi final")
+                        if (isAutoBuildSeriesBible) add("1 Memori Seri")
+                    }.joinToString(" + ")
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Jumlah Permintaan AI",
+                            text = "Perkiraan Panggilan AI",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "${segmentPlanSummary.totalRequestsCount} (${segmentPlanSummary.segmentCount} segmen + 1 narasi)",
+                            text = "≈ ${segmentPlanSummary.totalRequestsCount} ($requestBreakdown)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+
+                    Text(
+                        text = "Perkiraan ini tidak mencakup upload/polling video, retry, atau Gabung & Ekspor; kuota resmi ditentukan Google.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
                     Spacer(modifier = Modifier.height(6.dp))
 
@@ -2620,12 +2635,12 @@ private fun IdleSetupContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Status Kuota Model",
+                            text = "Pemeriksaan Kuota (perkiraan)",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "Perlu $needed permintaan, sisa $remaining",
+                            text = "Perlu sekitar $needed; hitungan lokal tersisa $remaining",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             color = if (isInsufficient) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary

@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.db.AppDatabase
+import com.example.data.prefs.ApiKeyCipher
 import com.example.data.prefs.ApiKeyStorage
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -20,6 +21,20 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class ExampleRobolectricTest {
 
+    private class TestApiKeyCipher : ApiKeyCipher {
+        override fun encrypt(plainText: String): String =
+            "test:" + java.util.Base64.getEncoder().encodeToString(plainText.toByteArray(Charsets.UTF_8))
+
+        override fun decrypt(encryptedText: String): String? = try {
+            if (!encryptedText.startsWith("test:")) null else String(
+                java.util.Base64.getDecoder().decode(encryptedText.removePrefix("test:")),
+                Charsets.UTF_8
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     @Test
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -30,13 +45,33 @@ class ExampleRobolectricTest {
     @Test
     fun `apiKeyStorage saves and retrieves custom key`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val storage = ApiKeyStorage(context)
+        val prefs = context.getSharedPreferences("rekapin_secure_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val storage = ApiKeyStorage(context, TestApiKeyCipher())
         val testKey = "AIzaSyTestApiKey123456"
         storage.saveApiKey(testKey)
 
         assertEquals(testKey, storage.getCustomApiKey())
         assertEquals(testKey, storage.getEffectiveApiKey())
         assertTrue(storage.hasApiKey())
+        assertTrue(!prefs.getString("custom_gemini_api_keys_encrypted", "").orEmpty().contains(testKey))
+        assertNull(prefs.getString("custom_gemini_api_keys_json", null))
+        assertNull(prefs.getString("custom_gemini_api_key", null))
+    }
+
+    @Test
+    fun `apiKeyStorage migrates legacy plaintext key and removes old values`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("rekapin_secure_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear()
+            .putString("custom_gemini_api_key", "AIzaSyLegacyTestKey")
+            .commit()
+
+        val storage = ApiKeyStorage(context, TestApiKeyCipher())
+
+        assertEquals("AIzaSyLegacyTestKey", storage.getCustomApiKey())
+        assertNull(prefs.getString("custom_gemini_api_key", null))
+        assertTrue(!prefs.getString("custom_gemini_api_keys_encrypted", "").orEmpty().contains("AIzaSyLegacyTestKey"))
     }
 
     @Test
@@ -80,6 +115,41 @@ class ExampleRobolectricTest {
         assertNull(dao.getAnalysisById(id))
 
         db.close()
+    }
+
+    @Test
+    fun `per analysis preferences can be removed when history is deleted`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val analysisId = 8_731_002L
+
+        val visualStyles = com.example.data.prefs.VisualStyleStorage(context)
+        val style = visualStyles.getAllStyles().first()
+        visualStyles.saveStyleForAnalysis(analysisId, style)
+        visualStyles.removeStyleForAnalysis(analysisId)
+        assertNull(visualStyles.getStyleForAnalysis(analysisId))
+
+        val narrationModes = com.example.data.prefs.NarrationModeStorage(context)
+        narrationModes.saveModeForAnalysis(analysisId, com.example.data.model.NarrationMode.DIALOG_KONTEN)
+        narrationModes.removeModeForAnalysis(analysisId)
+        assertNull(narrationModes.getModeForAnalysis(analysisId))
+
+        val cutModes = com.example.data.prefs.PromptCutModeStorage(context)
+        cutModes.saveModeForAnalysis(analysisId, com.example.data.model.PromptCutMode.PER_SCENE, 10)
+        cutModes.removeModeForAnalysis(analysisId)
+        assertNull(cutModes.getModeForAnalysis(analysisId))
+        assertEquals(5, cutModes.getMaxDurationForAnalysis(analysisId))
+
+        val openingEnding = com.example.data.prefs.OpeningEndingStorage(context)
+        openingEnding.save(
+            analysisId,
+            com.example.util.OpeningEndingFingerprint(
+                openingFrames = listOf(com.example.util.FrameFingerprint(0L, 170L)),
+                endingFrames = emptyList()
+            )
+        )
+        assertNotNull(openingEnding.get(analysisId))
+        openingEnding.remove(analysisId)
+        assertNull(openingEnding.get(analysisId))
     }
 
     @Test

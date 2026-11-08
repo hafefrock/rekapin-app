@@ -47,6 +47,11 @@ class NarrationModeStorage(context: Context) {
         return NarrationMode.fromDisplayName(raw)
     }
 
+    @Synchronized
+    fun removeModeForAnalysis(analysisId: Long) {
+        prefs.edit().remove(KEY_ANALYSIS_MODE_PREFIX + analysisId).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "rekapin_narration_mode_prefs"
         private const val KEY_MODE = "narration_mode"

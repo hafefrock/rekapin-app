@@ -930,7 +930,7 @@ class GeminiApiClient(
         var attempt = 0
         // Jeda bertahap: 10, 30, 60 detik untuk HTTP 500 / 503 (dan 429)
         val retryDelaysMs = listOf(10_000L, 30_000L, 60_000L)
-        val maxRetries = 3
+        val maxRetries = GeminiConstants.MAX_RETRIES
 
         while (true) {
             attempt++
@@ -981,7 +981,22 @@ class GeminiApiClient(
                         rawMessage = responseBody,
                         userFriendlyMessage = quotaCheck.userMessage,
                         isDailyQuota = true,
-                        retryDelaySeconds = quotaCheck.retryDelaySeconds
+                        retryDelaySeconds = quotaCheck.retryDelaySeconds,
+                        modelName = modelForCounting.orEmpty()
+                    )
+                }
+
+                if (statusCode == 429 && quotaCheck.retryDelaySeconds != null &&
+                    quotaCheck.retryDelaySeconds > QuotaHelper.MAX_AUTOMATIC_RETRY_WAIT_SECONDS
+                ) {
+                    throw GeminiApiException(
+                        stage = stage,
+                        httpCode = statusCode,
+                        rawMessage = responseBody,
+                        userFriendlyMessage = quotaCheck.userMessage,
+                        retryDelaySeconds = quotaCheck.retryDelaySeconds,
+                        isDailyQuota = false,
+                        modelName = modelForCounting.orEmpty()
                     )
                 }
 
@@ -1013,7 +1028,8 @@ class GeminiApiClient(
                             } else {
                                 "Batas kuota per menit Gemini terlampaui (HTTP 429) setelah $maxRetries kali percobaan."
                             },
-                            isDailyQuota = false
+                            isDailyQuota = false,
+                            modelName = modelForCounting.orEmpty()
                         )
                     }
                 }
@@ -1025,7 +1041,8 @@ class GeminiApiClient(
                     httpCode = statusCode,
                     rawMessage = responseBody,
                     userFriendlyMessage = parseErrorMessage(responseBody, statusCode),
-                    isDailyQuota = false
+                    isDailyQuota = false,
+                    modelName = modelForCounting.orEmpty()
                 )
 
             } catch (e: GeminiApiException) {
@@ -1045,7 +1062,8 @@ class GeminiApiClient(
                         stage = stage,
                         httpCode = null,
                         rawMessage = "IOException: ${e.message}\n${e.stackTraceToString()}",
-                        userFriendlyMessage = "Koneksi ke Gemini terputus: ${e.localizedMessage}. Pastikan perangkat terhubung ke internet."
+                        userFriendlyMessage = "Koneksi ke Gemini terputus: ${e.localizedMessage}. Pastikan perangkat terhubung ke internet.",
+                        modelName = modelForCounting.orEmpty()
                     )
                 }
             }
@@ -1053,7 +1071,8 @@ class GeminiApiClient(
         throw GeminiApiException(
             stage = stage,
             rawMessage = "Perulangan tak hingga selesai tanpa hasil.",
-            userFriendlyMessage = "Gagal mendapatkan respons dari server Google AI."
+            userFriendlyMessage = "Gagal mendapatkan respons dari server Google AI.",
+            modelName = modelForCounting.orEmpty()
         )
     }
 

@@ -39,7 +39,12 @@ object VideoThumbnailHelper {
             } else {
                 val raw = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 if (raw != null) {
-                    val scaled = Bitmap.createScaledBitmap(raw, THUMB_WIDTH, THUMB_HEIGHT, true)
+                    val scaled = try {
+                        Bitmap.createScaledBitmap(raw, THUMB_WIDTH, THUMB_HEIGHT, true)
+                    } catch (e: Exception) {
+                        raw.recycle()
+                        throw e
+                    }
                     if (scaled != raw) {
                         raw.recycle()
                     }

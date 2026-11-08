@@ -15,6 +15,7 @@ import com.example.data.db.AnalysisJsonAdapter
 import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.db.AppDatabase
 import com.example.data.model.AnalysisState
+import com.example.data.model.AnalysisResumePolicy
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.SelectedVideo
@@ -165,6 +166,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleAutoBuildSeriesBible(enabled: Boolean) {
         seriesBibleStorage.setAutoBuildEnabled(enabled)
         _isAutoBuildSeriesBible.value = enabled
+        updatePlanSummary()
         Log.i(TAG, "Pengaturan bangun memori seri otomatis diubah: $enabled")
     }
 
@@ -378,8 +380,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val viewingHistoryItem: StateFlow<AnimeAnalysisEntity?> = _viewingHistoryItem.asStateFlow()
 
     // ID analisis yang sedang aktif berjalan di database
+    @Volatile
     private var activeAnalysisId: Long? = null
     private var currentJob: Job? = null
+    @Volatile
+    private var runGeneration: Long = 0L
+
+    private fun isCurrentRun(runId: Long): Boolean = runId == runGeneration
 
     // Rentang analisis video (dalam detik absolut dari awal video)
     private val _analysisRangeStartSec = MutableStateFlow(0L)
@@ -544,12 +551,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val safeStart = _analysisRangeStartSec.value.coerceIn(0L, totalSeconds)
             val currentEnd = _analysisRangeEndSec.value
             val safeEnd = if (currentEnd <= 0L || currentEnd > totalSeconds) totalSeconds else currentEnd
-            _segmentPlanSummary.value = SegmentCalculator.calculatePlanSummary(
+            val plan = SegmentCalculator.calculatePlanSummary(
                 totalSeconds = totalSeconds,
                 option = _segmentDurationOption.value,
                 intervalSeconds = _promptIntervalSeconds.value,
                 rangeStartSec = safeStart,
                 rangeEndSec = safeEnd
+            )
+            _segmentPlanSummary.value = plan.copy(
+                totalRequestsCount = SegmentCalculator.estimateGeminiRequestCount(
+                    segmentCount = plan.segmentCount,
+                    includesFinalNarration = _narrationMode.value == NarrationMode.REKAP_VOICEOVER,
+                    includesSeriesBibleUpdate = _isAutoBuildSeriesBible.value
+                )
             )
         } else {
             _segmentPlanSummary.value = null
@@ -590,6 +604,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             seriesBibleStorage.removeBible(id)
             continuityWarningStorage.remove(id)
             repeatedSceneStorage.remove(id)
+            openingEndingStorage.remove(id)
+            visualStyleStorage.removeStyleForAnalysis(id)
+            narrationModeStorage.removeModeForAnalysis(id)
+            promptCutModeStorage.removeModeForAnalysis(id)
             _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value - id
             if (_viewingHistoryItem.value?.id == id) {
                 _viewingHistoryItem.value = null
@@ -716,6 +734,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setNarrationMode(mode: NarrationMode) {
         narrationModeStorage.setMode(mode)
         _narrationMode.value = narrationModeStorage.getMode()
+        updatePlanSummary()
         Log.i(TAG, "Mode narasi diatur ke: ${mode.displayName}")
     }
 
@@ -917,9 +936,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelAnalysis() {
         Log.i(TAG, "Membatalkan analisis aktif...")
+        runGeneration++
         AnalysisForegroundService.stop(context)
         currentJob?.cancel()
         currentJob = null
+        _analysisState.value = AnalysisState.Idle
 
         val currentId = activeAnalysisId
         if (currentId != null) {
@@ -962,6 +983,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        val runId = ++runGeneration
         currentJob?.cancel()
         val currentModel = modelStorage.getSelectedModel()
         AnalysisForegroundService.onCancelRequested = {
@@ -981,6 +1003,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var remoteFileUri = ""
 
             try {
+                if (!isCurrentRun(runId)) return@launch
                 var existingEntity: AnimeAnalysisEntity? = null
                 if (activeEntityId != null) {
                     existingEntity = repository.getAnalysisById(activeEntityId)
@@ -1222,13 +1245,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         remoteFileName = existingEntity.geminiFileRemoteName
                         remoteFileUri = existingEntity.geminiFileUri
                     }
-                    if (existingEntity.completedSegmentsCount > 0 && existingEntity.completedSegmentsCount < totalSegments) {
-                        startIndex = existingEntity.completedSegmentsCount
+                    if (existingEntity.completedSegmentsCount > 0) {
+                        startIndex = AnalysisResumePolicy.restoredSegmentIndex(
+                            existingEntity.completedSegmentsCount,
+                            totalSegments
+                        )
                         allCharacterSheet.addAll(AnalysisJsonAdapter.jsonToCharacterSheet(existingEntity.characterSheetJson))
                         allTimeline.addAll(AnalysisJsonAdapter.jsonToTimeline(existingEntity.timelineJson))
                         segmentSummaries.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentSummariesJson))
                         segmentModels.addAll(AnalysisJsonAdapter.jsonToSummaries(existingEntity.segmentModelsJson))
-                        Log.i(TAG, "Melanjutkan analisis ID ${existingEntity.id} dari segmen ${startIndex + 1} dengan ${allCharacterSheet.size} karakter tersimpan. Gaya: ${activeStyle.name}, Mode: ${activeMode.displayName}, CutMode: ${activeCutMode.displayName}")
+                        Log.i(TAG, "Memulihkan ${startIndex} segmen tersimpan untuk analisis ID ${existingEntity.id}. Gaya: ${activeStyle.name}, Mode: ${activeMode.displayName}, CutMode: ${activeCutMode.displayName}")
                     }
                 } else {
                     // Buat rekaman awal baru di Room database dengan rencana segmen tersimpan
@@ -1299,6 +1325,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
+                // Narasi final hanya menggunakan checkpoint lokal; tidak memerlukan upload atau validasi file Gemini.
+                if (AnalysisResumePolicy.shouldAnalyzeSegments(startIndex, totalSegments)) {
                 // Validasi File di Gemini API: Cek apakah masih ACTIVE dan apakah key aktif masih sama
                 currentStage = "Verifikasi Status Berkas di Gemini API"
                 val currentKeyHash = apiKeyStorage.getActiveKeyHash()
@@ -1356,6 +1384,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         context = context,
                         video = video,
                         onProgress = { percent, sent, total ->
+                            if (!isCurrentRun(runId)) return@uploadVideo
                             _analysisState.value = AnalysisState.Uploading(
                                 progressPercent = percent,
                                 bytesSent = sent,
@@ -1409,6 +1438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         model = currentModel
                     )
                     val activeFile = geminiClient.waitForFileActive(remoteFileName) { statusMsg ->
+                        if (!isCurrentRun(runId)) return@waitForFileActive
                         _analysisState.value = AnalysisState.PollingFileStatus(statusMsg)
                         AnalysisForegroundService.updateStatus(
                             context = context,
@@ -1439,6 +1469,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                } else {
+                    Log.i(TAG, "Semua segmen sudah tersimpan; melewati pemeriksaan/upload video dan langsung menyusun narasi final.")
+                }
 
                 // Model terpilih saat analisis dimulai atau dilanjutkan
                 val selectedModelName = modelStorage.getSelectedModel()
@@ -1449,7 +1482,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "Memulai analisis dengan model '$activeModel' (auto-switch: $isAutoSwitch, daftar: $modelList)")
 
                 // Deteksi adegan video sekali untuk seluruh rentang jika mode Per Adegan
-                if (activeCutMode == PromptCutMode.PER_SCENE) {
+                if (activeCutMode == PromptCutMode.PER_SCENE && AnalysisResumePolicy.shouldAnalyzeSegments(startIndex, totalSegments)) {
                     val safeStart = segmentSpans.firstOrNull()?.startSec ?: 0L
                     val safeEnd = segmentSpans.lastOrNull()?.endSec ?: totalSeconds
                     val requiredRawKey = RawSceneCacheKey(
@@ -1515,6 +1548,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                         startSec = safeStart,
                                         endSec = safeEnd,
                                         onProgress = { progress, msg ->
+                                            if (!isCurrentRun(runId)) return@detectRawCutPoints
                                             _analysisState.value = AnalysisState.Preparing(message = msg, progress = progress)
                                             AnalysisForegroundService.updateStatus(
                                                 context = context,
@@ -1555,6 +1589,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Loop Analisis per segmen (mulai dari startIndex - segmen tersimpan TIDAK dianalisis ulang)
                 for (i in startIndex until totalSegments) {
+                    if (!isCurrentRun(runId)) return@launch
                     val segment = segmentSpans[i]
                     val startSec = segment.startSec
                     val endSec = minOf(segment.endSec, totalSeconds)
@@ -1657,6 +1692,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 seriesBible = activeSeriesBible,
                                 speechActivityHints = speechActivityHints,
                                 onStatusUpdate = { statusMsg ->
+                                    if (!isCurrentRun(runId)) return@analyzeSegment
                                     _analysisState.value = AnalysisState.AnalyzingSegment(
                                         currentSegment = i + 1,
                                         totalSegments = totalSegments,
@@ -1782,6 +1818,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 language = currentLang,
                                 previousRecapContext = previousRecapContext,
                                 onStatusUpdate = { msg ->
+                                    if (!isCurrentRun(runId)) return@generateFinalNarration
                                     _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = activeModel)
                                 }
                             )
@@ -1808,6 +1845,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Simpan status COMPLETED ke database Room
+                if (!isCurrentRun(runId)) return@launch
                 activeEntityId?.let { id ->
                     val current = repository.getAnalysisById(id)
                     if (current != null) {
@@ -1850,6 +1888,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     seriesBible = currentBible
                 )
 
+                if (!isCurrentRun(runId)) return@launch
                 Log.i(TAG, "Analisis seluruh video selesai dengan sukses!")
                 _analysisState.value = AnalysisState.Success(finalResult, styleName = activeStyle.name)
                 AnalysisForegroundService.stop(context)
@@ -1875,7 +1914,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 _failedSeriesBibleBuildIds.value = _failedSeriesBibleBuildIds.value - finalActiveEntityId
                                 Log.i(TAG, "Memori seri untuk analisis ID $finalActiveEntityId berhasil disimpan: ${updatedBible.locations.size} lokasi, ${updatedBible.glossary.size} istilah, ${updatedBible.relationships.size} relasi, ${updatedBible.episodes.size} episode.")
                                 val currentState = _analysisState.value
-                                if (currentState is AnalysisState.Success) {
+                                if (currentState is AnalysisState.Success &&
+                                    activeAnalysisId == finalActiveEntityId &&
+                                    currentState.result.videoName == finalVideoName
+                                ) {
                                     _analysisState.value = currentState.copy(
                                         result = currentState.result.copy(seriesBible = updatedBible)
                                     )
@@ -1892,6 +1934,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
             } catch (e: GeminiApiException) {
+                if (!isCurrentRun(runId)) {
+                    Log.i(TAG, "Mengabaikan error Gemini dari run analisis yang sudah digantikan.")
+                    return@launch
+                }
                 Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
                 AnalysisForegroundService.stop(context)
                 if (e.isDailyQuota) {
@@ -1961,10 +2007,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isFileProcessingFailed = e.isFileProcessingFailed
                 )
             } catch (e: CancellationException) {
-                Log.i(TAG, "Analisis dibatalkan oleh pengguna.")
-                AnalysisForegroundService.stop(context)
-                _analysisState.value = AnalysisState.Idle
+                if (isCurrentRun(runId)) {
+                    Log.i(TAG, "Analisis aktif dibatalkan.")
+                    AnalysisForegroundService.stop(context)
+                    _analysisState.value = AnalysisState.Idle
+                } else {
+                    Log.i(TAG, "Cleanup cancellation run lama dilewati.")
+                }
             } catch (e: Exception) {
+                if (!isCurrentRun(runId)) {
+                    Log.i(TAG, "Mengabaikan exception dari run analisis yang sudah digantikan.")
+                    return@launch
+                }
                 AnalysisForegroundService.stop(context)
                 val isAccessLost = e is SecurityException ||
                         e is java.io.FileNotFoundException ||
@@ -2151,7 +2205,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        val runId = ++runGeneration
         currentJob?.cancel()
+        AnalysisForegroundService.onCancelRequested = { cancelAnalysis() }
+        AnalysisForegroundService.start(
+            context = context,
+            model = modelStorage.getSelectedModel(),
+            title = "Menyelesaikan Analisis",
+            message = "Menyusun hasil dari segmen yang tersimpan..."
+        )
         currentJob = viewModelScope.launch {
             try {
                 val entity = repository.getAnalysisById(targetId)
@@ -2214,6 +2276,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     updatedAt = System.currentTimeMillis()
                 )
                 repository.update(updatedEntity)
+                if (!isCurrentRun(runId)) return@launch
                 activeAnalysisId = null
                 Log.i(TAG, "Analisis ID $targetId selesai tanpa segmen terakhir dan ditandai COMPLETED di Room.")
 
@@ -2236,7 +2299,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyCompleted(context, entity.videoName)
 
+            } catch (e: CancellationException) {
+                if (isCurrentRun(runId)) {
+                    AnalysisForegroundService.stop(context)
+                    _analysisState.value = AnalysisState.Idle
+                }
             } catch (e: GeminiApiException) {
+                if (!isCurrentRun(runId)) return@launch
                 Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen: ${e.userFriendlyMessage}", e)
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, e.stage, e.userFriendlyMessage)
@@ -2249,6 +2318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     modelName = modelStorage.getSelectedModel()
                 )
             } catch (e: Exception) {
+                if (!isCurrentRun(runId)) return@launch
                 Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.message}", e)
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, "Selesaikan Tanpa Segmen", e.localizedMessage ?: "Gagal")
@@ -2266,6 +2336,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        runGeneration++
         AnalysisForegroundService.stop(context)
     }
 

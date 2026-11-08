@@ -52,6 +52,14 @@ class PromptCutModeStorage(context: Context) {
         return prefs.getInt(KEY_ANALYSIS_MAX_DUR_PREFIX + analysisId, 5)
     }
 
+    @Synchronized
+    fun removeModeForAnalysis(analysisId: Long) {
+        prefs.edit()
+            .remove(KEY_ANALYSIS_MODE_PREFIX + analysisId)
+            .remove(KEY_ANALYSIS_MAX_DUR_PREFIX + analysisId)
+            .apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "rekapin_cut_mode_prefs"
         private const val KEY_MODE = "prompt_cut_mode"

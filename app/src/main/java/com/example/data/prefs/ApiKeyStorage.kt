@@ -2,27 +2,112 @@ package com.example.data.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import android.util.Log
 import com.example.BuildConfig
 import com.example.data.model.ApiKeyItem
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
-class ApiKeyStorage(context: Context) {
+internal interface ApiKeyCipher {
+    fun encrypt(plainText: String): String
+    fun decrypt(encryptedText: String): String?
+}
 
+private object AndroidKeyStoreApiKeyCipher : ApiKeyCipher {
+    private const val KEY_ALIAS = "rekapin_api_keys_aes_gcm"
+    private const val TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val IV_LENGTH_BYTES = 12
+
+    override fun encrypt(plainText: String): String {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val iv = cipher.iv
+        val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+        val packed = ByteArray(iv.size + encrypted.size)
+        System.arraycopy(iv, 0, packed, 0, iv.size)
+        System.arraycopy(encrypted, 0, packed, iv.size, encrypted.size)
+        return "v1:" + Base64.encodeToString(packed, Base64.NO_WRAP)
+    }
+
+    override fun decrypt(encryptedText: String): String? {
+        if (!encryptedText.startsWith("v1:")) return null
+        return try {
+            val packed = Base64.decode(encryptedText.removePrefix("v1:"), Base64.NO_WRAP)
+            if (packed.size <= IV_LENGTH_BYTES) return null
+            val iv = packed.copyOfRange(0, IV_LENGTH_BYTES)
+            val ciphertext = packed.copyOfRange(IV_LENGTH_BYTES, packed.size)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+            String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e(TAG, "Tidak dapat membuka penyimpanan API key terenkripsi.", e)
+            null
+        }
+    }
+
+    private fun getOrCreateKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+        if (existing != null) return existing
+
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    private const val TAG = "ApiKeyStorage"
+}
+
+class ApiKeyStorage internal constructor(
+    context: Context,
+    private val cipher: ApiKeyCipher = AndroidKeyStoreApiKeyCipher
+) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
         migrateExistingKeyIfNeeded()
     }
 
-    /**
-     * Migrasi key lama dari KEY_GEMINI_API_KEY atau BuildConfig menjadi "Key 1" dan aktif.
-     */
+    /** Migrates legacy plaintext preferences once; secrets are only deleted after encryption succeeds. */
     @Synchronized
     private fun migrateExistingKeyIfNeeded() {
-        val keysJson = prefs.getString(KEY_API_KEYS_JSON, null)
-        if (!keysJson.isNullOrBlank()) {
+        if (!prefs.getString(KEY_API_KEYS_ENCRYPTED, null).isNullOrBlank()) {
+            removeLegacyPlaintextKeys()
             return
+        }
+
+        val legacyJson = prefs.getString(KEY_API_KEYS_JSON, null)
+        if (!legacyJson.isNullOrBlank()) {
+            val oldKeys = parseKeysJson(legacyJson)
+            if (oldKeys.isNotEmpty()) {
+                val activeId = getActiveKeyId().takeIf { id -> oldKeys.any { it.id == id } }
+                    ?: oldKeys.firstOrNull { it.isActive }?.id
+                    ?: oldKeys.first().id
+                try {
+                    saveKeysInternal(oldKeys, activeId)
+                    return
+                } catch (e: Exception) {
+                    Log.e(TAG, "Migrasi daftar API key ke penyimpanan terenkripsi gagal.", e)
+                    return
+                }
+            }
         }
 
         val existingCustomKey = prefs.getString(KEY_GEMINI_API_KEY, "")?.trim().orEmpty()
@@ -31,7 +116,6 @@ class ApiKeyStorage(context: Context) {
         } catch (_: Exception) {
             ""
         }.trim()
-
         val keyToMigrate = when {
             existingCustomKey.isNotBlank() -> existingCustomKey
             buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY" -> buildKey
@@ -39,25 +123,27 @@ class ApiKeyStorage(context: Context) {
         }
 
         if (keyToMigrate.isNotBlank()) {
-            val initialKey = ApiKeyItem(
-                name = "Key 1",
-                key = keyToMigrate,
-                isActive = true
-            )
-            saveKeysInternal(listOf(initialKey), initialKey.id)
+            val initialKey = ApiKeyItem(name = "Key 1", key = keyToMigrate, isActive = true)
+            try {
+                saveKeysInternal(listOf(initialKey), initialKey.id)
+            } catch (e: Exception) {
+                Log.e(TAG, "Migrasi API key lama ke penyimpanan terenkripsi gagal.", e)
+            }
+        } else {
+            removeLegacyPlaintextKeys()
         }
     }
 
     @Synchronized
     fun getAllKeys(): List<ApiKeyItem> {
-        val jsonStr = prefs.getString(KEY_API_KEYS_JSON, null)
-        if (jsonStr.isNullOrBlank()) {
+        var encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        if (encrypted.isNullOrBlank()) {
             migrateExistingKeyIfNeeded()
-            val recheck = prefs.getString(KEY_API_KEYS_JSON, null)
-            if (recheck.isNullOrBlank()) return emptyList()
-            return parseKeysJson(recheck)
+            encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
         }
-        return parseKeysJson(jsonStr)
+        if (encrypted.isNullOrBlank()) return emptyList()
+        val json = cipher.decrypt(encrypted) ?: return emptyList()
+        return parseKeysJson(json)
     }
 
     @Synchronized
@@ -65,13 +151,8 @@ class ApiKeyStorage(context: Context) {
         val currentKeys = getAllKeys().toMutableList()
         val cleanName = name.trim().ifBlank { "Key ${currentKeys.size + 1}" }
         val cleanKey = key.trim()
-
         val isFirst = currentKeys.isEmpty()
-        val newKey = ApiKeyItem(
-            name = cleanName,
-            key = cleanKey,
-            isActive = isFirst
-        )
+        val newKey = ApiKeyItem(name = cleanName, key = cleanKey, isActive = isFirst)
         currentKeys.add(newKey)
         val activeId = if (isFirst) newKey.id else getActiveKeyId()
         saveKeysInternal(currentKeys, activeId)
@@ -82,11 +163,9 @@ class ApiKeyStorage(context: Context) {
     fun renameKey(id: String, newName: String): Boolean {
         val cleanName = newName.trim()
         if (cleanName.isBlank()) return false
-
         val currentKeys = getAllKeys()
-        val updated = currentKeys.map { item ->
-            if (item.id == id) item.copy(name = cleanName) else item
-        }
+        if (currentKeys.none { it.id == id }) return false
+        val updated = currentKeys.map { item -> if (item.id == id) item.copy(name = cleanName) else item }
         saveKeysInternal(updated, getActiveKeyId())
         return true
     }
@@ -94,14 +173,9 @@ class ApiKeyStorage(context: Context) {
     @Synchronized
     fun deleteKey(id: String): Boolean {
         val currentKeys = getAllKeys()
+        if (currentKeys.none { it.id == id }) return false
         val remaining = currentKeys.filterNot { it.id == id }
-        var activeId = getActiveKeyId()
-
-        if (activeId == id) {
-            // Jika key aktif yang dihapus, alihkan aktif ke key pertama yang tersisa
-            activeId = remaining.firstOrNull()?.id ?: ""
-        }
-
+        val activeId = if (getActiveKeyId() == id) remaining.firstOrNull()?.id.orEmpty() else getActiveKeyId()
         saveKeysInternal(remaining, activeId)
         return true
     }
@@ -109,9 +183,7 @@ class ApiKeyStorage(context: Context) {
     @Synchronized
     fun setActiveKey(id: String): Boolean {
         val currentKeys = getAllKeys()
-        val exists = currentKeys.any { it.id == id }
-        if (!exists) return false
-
+        if (currentKeys.none { it.id == id }) return false
         saveKeysInternal(currentKeys, id)
         return true
     }
@@ -124,9 +196,7 @@ class ApiKeyStorage(context: Context) {
         return keys.firstOrNull { it.id == activeId } ?: keys.firstOrNull()
     }
 
-    fun getActiveKeyName(): String {
-        return getActiveKeyItem()?.name ?: "Key 1"
-    }
+    fun getActiveKeyName(): String = getActiveKeyItem()?.name ?: "Key 1"
 
     fun getActiveKeyHash(): String {
         val active = getActiveKeyItem()
@@ -135,24 +205,18 @@ class ApiKeyStorage(context: Context) {
 
     fun getEffectiveApiKey(): String {
         val activeKey = getActiveKeyItem()?.key?.trim().orEmpty()
-        if (activeKey.isNotBlank()) {
-            return activeKey
-        }
+        if (activeKey.isNotBlank()) return activeKey
         val buildKey = try {
             BuildConfig.GEMINI_API_KEY
         } catch (_: Exception) {
             ""
         }
-        if (buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY") {
-            return buildKey.trim()
-        }
-        return ""
+        return buildKey.trim().takeUnless { it.isBlank() || it == "MY_GEMINI_API_KEY" }.orEmpty()
     }
 
-    fun getCustomApiKey(): String {
-        return getActiveKeyItem()?.key ?: prefs.getString(KEY_GEMINI_API_KEY, "")?.trim().orEmpty()
-    }
+    fun getCustomApiKey(): String = getActiveKeyItem()?.key.orEmpty()
 
+    @Synchronized
     fun saveApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
         val keys = getAllKeys()
@@ -160,43 +224,40 @@ class ApiKeyStorage(context: Context) {
             addKey("Key 1", trimmed)
         } else {
             val active = getActiveKeyItem() ?: keys.first()
-            val updated = keys.map { item ->
-                if (item.id == active.id) item.copy(key = trimmed) else item
-            }
+            val updated = keys.map { item -> if (item.id == active.id) item.copy(key = trimmed) else item }
             saveKeysInternal(updated, active.id)
         }
     }
 
-    fun hasApiKey(): Boolean {
-        return getEffectiveApiKey().isNotBlank()
-    }
+    fun hasApiKey(): Boolean = getEffectiveApiKey().isNotBlank()
 
-    private fun getActiveKeyId(): String {
-        return prefs.getString(KEY_ACTIVE_KEY_ID, "") ?: ""
-    }
+    private fun getActiveKeyId(): String = prefs.getString(KEY_ACTIVE_KEY_ID, "") ?: ""
 
     private fun saveKeysInternal(keys: List<ApiKeyItem>, activeId: String) {
         val jsonArray = JSONArray()
-        val resolvedActiveId = if (keys.any { it.id == activeId }) activeId else keys.firstOrNull()?.id ?: ""
-
+        val resolvedActiveId = if (keys.any { it.id == activeId }) activeId else keys.firstOrNull()?.id.orEmpty()
         keys.forEach { item ->
-            val obj = JSONObject().apply {
+            jsonArray.put(JSONObject().apply {
                 put("id", item.id)
                 put("name", item.name)
                 put("key", item.key)
                 put("isActive", item.id == resolvedActiveId)
                 put("createdAt", item.createdAt)
-            }
-            jsonArray.put(obj)
+            })
         }
 
-        val activeKeyString = keys.firstOrNull { it.id == resolvedActiveId }?.key?.trim().orEmpty()
-
+        // Encrypt before editing preferences. If encryption fails, never persist a plaintext fallback.
+        val encrypted = cipher.encrypt(jsonArray.toString())
         prefs.edit()
-            .putString(KEY_API_KEYS_JSON, jsonArray.toString())
+            .putString(KEY_API_KEYS_ENCRYPTED, encrypted)
             .putString(KEY_ACTIVE_KEY_ID, resolvedActiveId)
-            .putString(KEY_GEMINI_API_KEY, activeKeyString)
+            .remove(KEY_API_KEYS_JSON)
+            .remove(KEY_GEMINI_API_KEY)
             .apply()
+    }
+
+    private fun removeLegacyPlaintextKeys() {
+        prefs.edit().remove(KEY_API_KEYS_JSON).remove(KEY_GEMINI_API_KEY).apply()
     }
 
     private fun parseKeysJson(jsonStr: String): List<ApiKeyItem> {
@@ -211,29 +272,22 @@ class ApiKeyStorage(context: Context) {
                 val key = obj.optString("key", "")
                 val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                 val isActive = if (activeId.isNotBlank()) id == activeId else obj.optBoolean("isActive", i == 0)
-
                 if (id.isNotBlank() && key.isNotBlank()) {
-                    list.add(
-                        ApiKeyItem(
-                            id = id,
-                            name = name,
-                            key = key,
-                            isActive = isActive,
-                            createdAt = createdAt
-                        )
-                    )
+                    list.add(ApiKeyItem(id = id, name = name, key = key, isActive = isActive, createdAt = createdAt))
                 }
             }
         } catch (_: Exception) {
-            // fallback gracefully
+            // Ignore malformed legacy or encrypted JSON without logging secret material.
         }
         return list
     }
 
     companion object {
+        private const val TAG = "ApiKeyStorage"
         private const val PREFS_NAME = "rekapin_secure_prefs"
         private const val KEY_GEMINI_API_KEY = "custom_gemini_api_key"
         private const val KEY_API_KEYS_JSON = "custom_gemini_api_keys_json"
+        private const val KEY_API_KEYS_ENCRYPTED = "custom_gemini_api_keys_encrypted"
         private const val KEY_ACTIVE_KEY_ID = "active_gemini_key_id"
     }
 }

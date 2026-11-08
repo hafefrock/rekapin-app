@@ -23,7 +23,7 @@ data class SegmentPlanSummary(
     val segmentDurationLabel: String,
     val segmentCount: Int,
     val estimatedScenesCount: Int,
-    val totalRequestsCount: Int, // segmen + 1 narasi
+    val totalRequestsCount: Int, // Estimasi segmen + pekerjaan AI tambahan
     val spans: List<SegmentSpan>,
     val rangeStartSec: Long = 0L,
     val rangeEndSec: Long = totalSeconds,
@@ -68,13 +68,17 @@ object SegmentCalculator {
                 2 -> {
                     val m = parts[0].toLong()
                     val s = parts[1].toLong()
-                    if (m < 0 || s < 0 || s >= 60) null else m * 60 + s
+                    if (m < 0 || s < 0 || s >= 60) null else Math.addExact(Math.multiplyExact(m, 60L), s)
                 }
                 3 -> {
                     val h = parts[0].toLong()
                     val m = parts[1].toLong()
                     val s = parts[2].toLong()
-                    if (h < 0 || m < 0 || m >= 60 || s < 0 || s >= 60) null else h * 3600 + m * 60 + s
+                    if (h < 0 || m < 0 || m >= 60 || s < 0 || s >= 60) null else {
+                        val hours = Math.multiplyExact(h, 3600L)
+                        val minutesAndSeconds = Math.addExact(Math.multiplyExact(m, 60L), s)
+                        Math.addExact(hours, minutesAndSeconds)
+                    }
                 }
                 else -> null
             }
@@ -136,7 +140,7 @@ object SegmentCalculator {
         rangeEndSec: Long = totalSeconds
     ): List<SegmentSpan> {
         val safeTotal = totalSeconds.coerceAtLeast(1L)
-        val safeStart = rangeStartSec.coerceIn(0L, safeTotal)
+        val safeStart = rangeStartSec.coerceIn(0L, safeTotal - 1L)
         val safeEnd = rangeEndSec.coerceIn(safeStart + 1L, safeTotal)
         val rangeDuration = (safeEnd - safeStart).coerceAtLeast(1L)
 
@@ -167,7 +171,7 @@ object SegmentCalculator {
         var index = 1
 
         while (relativeStart < rangeDuration) {
-            val relativeNormalEnd = minOf(relativeStart + segmentDuration, rangeDuration)
+            val relativeNormalEnd = relativeStart + minOf(segmentDuration, rangeDuration - relativeStart)
             val remainingAfter = rangeDuration - relativeNormalEnd
 
             // Jika sisa durasi setelah segmen ini ada (>0) tapi kurang dari 90 detik,
@@ -208,7 +212,7 @@ object SegmentCalculator {
         rangeEndSec: Long = totalSeconds
     ): SegmentPlanSummary {
         val safeTotal = totalSeconds.coerceAtLeast(1L)
-        val safeStart = rangeStartSec.coerceIn(0L, safeTotal)
+        val safeStart = rangeStartSec.coerceIn(0L, safeTotal - 1L)
         val safeEnd = rangeEndSec.coerceIn(safeStart + 1L, safeTotal)
         val rangeDuration = (safeEnd - safeStart).coerceAtLeast(1L)
 
@@ -221,8 +225,15 @@ object SegmentCalculator {
         )
         val segmentCount = spans.size
         val safeInterval = intervalSeconds.coerceAtLeast(1)
-        val estimatedScenes = (rangeDuration / safeInterval).toInt().coerceAtLeast(1)
-        val totalRequests = segmentCount + 1 // segmen + 1 narasi
+        val estimatedScenes = (rangeDuration / safeInterval)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+            .coerceAtLeast(1)
+        val totalRequests = estimateGeminiRequestCount(
+            segmentCount = segmentCount,
+            includesFinalNarration = true,
+            includesSeriesBibleUpdate = false
+        )
 
         val fullDurationStr = formatTimeSeconds(safeTotal)
         val startStr = formatTimeSeconds(safeStart)
@@ -249,5 +260,17 @@ object SegmentCalculator {
             rangeDurationSec = rangeDuration,
             rangeFormatted = rangeFormatted
         )
+    }
+
+    fun estimateGeminiRequestCount(
+        segmentCount: Int,
+        includesFinalNarration: Boolean,
+        includesSeriesBibleUpdate: Boolean
+    ): Int {
+        val extraRequests = (if (includesFinalNarration) 1L else 0L) +
+            (if (includesSeriesBibleUpdate) 1L else 0L)
+        return (segmentCount.coerceAtLeast(0).toLong() + extraRequests)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
     }
 }

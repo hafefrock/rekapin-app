@@ -126,7 +126,12 @@ object SceneDetector {
                     } else {
                         val fullBm = retriever.getFrameAtTime(timeUs, retrievalOption)
                         if (fullBm != null) {
-                            val scaled = Bitmap.createScaledBitmap(fullBm, FRAME_WIDTH, FRAME_HEIGHT, true)
+                            val scaled = try {
+                                Bitmap.createScaledBitmap(fullBm, FRAME_WIDTH, FRAME_HEIGHT, true)
+                            } catch (e: Exception) {
+                                fullBm.recycle()
+                                throw e
+                            }
                             if (scaled != fullBm) fullBm.recycle()
                             scaled
                         } else null

@@ -1,22 +1,28 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Rekapin
 
-# Run and deploy your AI Studio app
+Rekapin adalah aplikasi Android Kotlin dan Jetpack Compose untuk menganalisis video anime per segmen menggunakan Gemini File API, menyusun ringkasan/narasi, dan mengelola hasil serta seri. Aplikasi menyimpan riwayat analisis di Room; metadata fitur tambahan disimpan di SharedPreferences.
 
-This contains everything you need to run your app locally.
+## Menjalankan aplikasi
 
-View your app in AI Studio: https://ai.studio/apps/df5da034-eff3-4ed1-9148-203848723e30
+1. Buka folder repository ini di Android Studio dan tunggu Gradle sync selesai.
+2. Gunakan Android SDK yang sesuai dengan konfigurasi `compileSdk` pada `app/build.gradle.kts`.
+3. Jalankan konfigurasi `app` pada emulator atau perangkat Android (minimum API 24).
+4. Masukkan Gemini API key melalui Pengaturan di aplikasi. Untuk pengembangan lokal, `.env` dapat menyediakan `GEMINI_API_KEY` sebagai fallback build; jangan commit `.env` atau memasukkan API key ke source control.
 
-## Run Locally
+## Tes dan build
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+GitHub Actions menjalankan unit test dan tes instrumentasi emulator, kemudian membangun APK debug. Perintah Gradle yang digunakan CI:
 
+```sh
+gradle testDebugUnitTest
+# instrumentasi emulator: gradle connectedDebugAndroidTest
+gradle assembleDebug
+```
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+APK debug diunggah sebagai artifact workflow bernama `rekapin-apk`. Unduh artifact dari run GitHub Actions yang sesuai dengan commit yang diinginkan. Hasil tes unit diunggah terpisah ketika tersedia.
+
+## Keamanan dan signing
+
+API key yang dimasukkan pengguna dienkripsi dengan AES-GCM melalui Android Keystore. File preferences yang menyimpan key dikecualikan dari Android cloud backup dan device transfer. Berkas `.env`, API key, dan keystore tidak boleh dimasukkan ke Git.
+
+Build release mengharapkan konfigurasi signing melalui environment (`KEYSTORE_PATH`, `STORE_PASSWORD`, dan `KEY_PASSWORD`) serta keystore dengan alias `upload`. Build debug yang dihasilkan CI bukan APK release untuk distribusi Play Store. Jangan menghapus konfigurasi signing dari Gradle untuk mengatasi kegagalan; siapkan secret signing yang benar untuk build release.

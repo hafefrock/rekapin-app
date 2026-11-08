@@ -191,4 +191,8 @@ class VisualStyleStorage(context: Context) {
             null
         }
     }
+
+    fun removeStyleForAnalysis(analysisId: Long) {
+        prefs.edit().remove(KEY_ANALYSIS_STYLE_PREFIX + analysisId).apply()
+    }
 }
