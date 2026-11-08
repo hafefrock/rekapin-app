@@ -35,6 +35,8 @@ object SegmentCalculator {
     const val DEFAULT_SEGMENT_DURATION_SECONDS = GeminiConstants.SEGMENT_DURATION_SECONDS // 180L
     const val MIN_LAST_SEGMENT_SECONDS = 90L
     const val MIN_RANGE_SECONDS = 10L
+    // Rekapin menganalisis video episode; batas 7 hari mencegah input waktu ekstrem yang valid secara Long.
+    const val MAX_PARSEABLE_TIME_SECONDS = 7L * 24L * 60L * 60L
 
     /**
      * Format detik menjadi "mm:ss" atau "h:mm:ss" jika durasi >= 1 jam.
@@ -63,12 +65,15 @@ object SegmentCalculator {
             when (parts.size) {
                 1 -> {
                     val s = parts[0].toLong()
-                    if (s >= 0) s else null
+                    if (s in 0..MAX_PARSEABLE_TIME_SECONDS) s else null
                 }
                 2 -> {
                     val m = parts[0].toLong()
                     val s = parts[1].toLong()
-                    if (m < 0 || s < 0 || s >= 60) null else Math.addExact(Math.multiplyExact(m, 60L), s)
+                    if (m < 0 || s < 0 || s >= 60) null else {
+                        Math.addExact(Math.multiplyExact(m, 60L), s)
+                            .takeIf { it <= MAX_PARSEABLE_TIME_SECONDS }
+                    }
                 }
                 3 -> {
                     val h = parts[0].toLong()
@@ -78,6 +83,7 @@ object SegmentCalculator {
                         val hours = Math.multiplyExact(h, 3600L)
                         val minutesAndSeconds = Math.addExact(Math.multiplyExact(m, 60L), s)
                         Math.addExact(hours, minutesAndSeconds)
+                            .takeIf { it <= MAX_PARSEABLE_TIME_SECONDS }
                     }
                 }
                 else -> null

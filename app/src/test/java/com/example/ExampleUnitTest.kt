@@ -317,9 +317,10 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testParseTimeSecondsRejectsLongOverflow() {
+    fun testParseTimeSecondsRejectsOverflowAndUnreasonableDuration() {
         assertNull(com.example.util.SegmentCalculator.parseTimeSeconds("9223372036854775807:59"))
         assertNull(com.example.util.SegmentCalculator.parseTimeSeconds("2562047788015215:30:00"))
+        assertNull(com.example.util.SegmentCalculator.parseTimeSeconds("9223372036854775800"))
         assertEquals(3661L, com.example.util.SegmentCalculator.parseTimeSeconds("1:01:01"))
     }
 
