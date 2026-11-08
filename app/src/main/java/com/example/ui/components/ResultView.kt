@@ -550,48 +550,47 @@ fun ResultView(
     var selectedTab by remember { mutableIntStateOf(0) }
     val hasNarration = result.narration.isNotBlank()
     val narasiTabLabel = when {
-        effectiveModeName.contains("Dialog", ignoreCase = true) -> "a. Dialog"
-        effectiveModeName.contains("Asli", ignoreCase = true) -> "a. Narasi Asli"
-        else -> "a. Narasi"
+        effectiveModeName.contains("Dialog", ignoreCase = true) -> "Dialog"
+        effectiveModeName.contains("Asli", ignoreCase = true) -> "Narasi Asli"
+        else -> "Narasi"
     }
     val tabs = remember(result.characterSheet.size, result.timeline.size, result.segmentSummaries.size, hasNarration, narasiTabLabel, effectiveBible) {
         buildList {
-            add("Semua Format")
+            add("Semua")
             if (hasNarration) {
                 add(narasiTabLabel)
             }
-            add("b. Karakter (${result.characterSheet.size})")
-            add("c. Timeline (${result.timeline.size})")
+            add("Karakter (${result.characterSheet.size})")
+            add("Timeline (${result.timeline.size})")
             if (result.segmentSummaries.isNotEmpty()) {
-                add("d. Segmen (${result.segmentSummaries.size})")
+                add("Segmen (${result.segmentSummaries.size})")
             }
             if (effectiveBible != null && !effectiveBible.isEmpty()) {
-                add("e. Memori Seri")
+                add("Memori Seri")
             }
         }
     }
+    val safeSelectedTab = selectedTab.coerceIn(tabs.indices)
 
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
-        // Info Header: Interval Prompt, Mode Narasi & Bahasa
+        // Ringkasan hasil: judul kuat dan metadata tetap ringkas.
         Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            ),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 10.dp)
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 if (result.videoName.isNotBlank()) {
                     Text(
                         text = result.videoName,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -736,7 +735,7 @@ fun ResultView(
 
         // Tab Navigation
         ScrollableTabRow(
-            selectedTabIndex = selectedTab,
+            selectedTabIndex = safeSelectedTab,
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.primary,
             edgePadding = 12.dp,
@@ -753,13 +752,13 @@ fun ResultView(
         ) {
             tabs.forEachIndexed { index, title ->
                 Tab(
-                    selected = selectedTab == index,
+                    selected = safeSelectedTab == index,
                     onClick = { selectedTab = index },
                     text = {
                         Text(
                             text = title,
                             fontSize = 13.sp,
-                            fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (safeSelectedTab == index) FontWeight.Bold else FontWeight.Normal
                         )
                     },
                     modifier = Modifier.testTag("tab_result_$index")
@@ -769,11 +768,10 @@ fun ResultView(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        val safeSelectedTab = if (selectedTab in tabs.indices) selectedTab else 0
-        val currentTabTitle = tabs.getOrElse(safeSelectedTab) { "Semua Format" }
+        val currentTabTitle = tabs[safeSelectedTab]
 
         when {
-            currentTabTitle == narasiTabLabel || currentTabTitle.startsWith("a. ") -> NarrationSection(
+            currentTabTitle == narasiTabLabel -> NarrationSection(
                 narration = result.narration,
                 modeName = effectiveModeName,
                 onCopyNarration = {
@@ -781,14 +779,14 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
-            currentTabTitle.startsWith("b. Karakter") -> CharacterSheetSection(
+            currentTabTitle.startsWith("Karakter (") -> CharacterSheetSection(
                 characters = result.characterSheet,
                 onCopyCharacters = {
                     clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(result.characterSheet)))
                     notify("Tersalin")
                 }
             )
-            currentTabTitle.startsWith("c. Timeline") -> TimelineSection(
+            currentTabTitle.startsWith("Timeline (") -> TimelineSection(
                 timeline = result.timeline,
                 intervalSeconds = result.intervalSeconds,
                 maxSceneDuration = result.maxSceneDuration,
@@ -806,7 +804,7 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
-            currentTabTitle.startsWith("d. Segmen") -> SegmentSummariesSection(
+            currentTabTitle.startsWith("Segmen (") -> SegmentSummariesSection(
                 summaries = result.segmentSummaries,
                 models = result.segmentModels,
                 onCopyAll = {
@@ -818,7 +816,7 @@ fun ResultView(
                     notify("Tersalin")
                 }
             )
-            currentTabTitle.startsWith("e. Memori Seri") -> effectiveBible?.let { bible ->
+            currentTabTitle == "Memori Seri" -> effectiveBible?.let { bible ->
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()

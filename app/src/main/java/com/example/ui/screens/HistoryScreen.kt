@@ -167,7 +167,7 @@ fun HistoryScreen(
                                     selectedIds = emptySet()
                                 },
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.height(38.dp)
+                                modifier = Modifier.height(48.dp)
                             ) {
                                 Text("Batal", fontSize = 12.sp)
                             }
@@ -176,7 +176,7 @@ fun HistoryScreen(
                                 enabled = selectedIds.size >= 2,
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
-                                    .height(38.dp)
+                                    .height(48.dp)
                                     .testTag("btn_merge_export"),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
@@ -443,7 +443,7 @@ private fun HistoryItemCard(
                 IconButton(
                     onClick = onDelete,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(48.dp)
                         .testTag("delete_history_${entity.id}")
                 ) {
                     Icon(
