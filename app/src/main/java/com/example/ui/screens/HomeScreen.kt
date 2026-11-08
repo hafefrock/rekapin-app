@@ -763,6 +763,7 @@ private fun IdleSetupContent(
     val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
+    var showAdvancedAnalysisOptions by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -2081,6 +2082,49 @@ private fun IdleSetupContent(
             }
         }
 
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showAdvancedAnalysisOptions = !showAdvancedAnalysisOptions }
+                .testTag("advanced_analysis_options_toggle")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Opsi lanjutan",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Gaya visual dan pengaturan seri",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = if (showAdvancedAnalysisOptions) "Tutup opsi lanjutan" else "Buka opsi lanjutan",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = showAdvancedAnalysisOptions) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Pilihan Gaya Visual Prompt
         Text(
             text = "Gaya Visual",
@@ -2426,6 +2470,9 @@ private fun IdleSetupContent(
                         }
                     }
                 }
+            }
+        }
+
             }
         }
 
