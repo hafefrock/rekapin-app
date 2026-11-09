@@ -69,6 +69,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -85,6 +87,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -163,12 +166,31 @@ fun HomeScreen(
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
     var manualQuotaModelToEdit by remember { mutableStateOf<String?>(null) }
+    var selectedDestination by remember { mutableIntStateOf(0) }
 
     val historyList by viewModel.historyList.collectAsState()
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
     val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsState()
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(isHistoryOpen) {
+        if (isHistoryOpen) selectedDestination = 1
+    }
+
+    val onSelectPrimaryDestination: (Int) -> Unit = { destination ->
+        selectedDestination = destination
+        when (destination) {
+            0 -> {
+                viewModel.closeHistory()
+                if (isSettingsOpen) viewModel.closeSettings()
+            }
+            1 -> viewModel.openHistory()
+            2 -> {
+                viewModel.closeHistory()
+                viewModel.openSettings()
+            }
+        }
+    }
 
     // Activity Result Launcher untuk memilih video menggunakan OpenDocument (Storage Access Framework)
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -248,11 +270,13 @@ fun HomeScreen(
                     viewModel.startAnalysis(historyEntity.id)
                 }
                 viewModel.closeHistory()
+                selectedDestination = 0
             },
             onFinishWithoutCurrentSegment = {
                 viewModel.finishWithoutCurrentSegment(historyEntity.id)
                 viewModel.closeHistoryDetail()
                 viewModel.closeHistory()
+                selectedDestination = 0
             }
         )
         return
@@ -262,7 +286,10 @@ fun HomeScreen(
     if (isHistoryOpen) {
         HistoryScreen(
             analyses = historyList,
-            onBack = { viewModel.closeHistory() },
+            onBack = {
+                viewModel.closeHistory()
+                selectedDestination = 0
+            },
             onSelectAnalysis = { viewModel.openHistoryDetail(it) },
             onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
             onResumeAnalysis = { resumeId ->
@@ -270,6 +297,7 @@ fun HomeScreen(
                     viewModel.startAnalysis(resumeId)
                 }
                 viewModel.closeHistory()
+                selectedDestination = 0
             },
             getMaxDurationForAnalysis = { viewModel.getMaxDurationForAnalysis(it) },
             failedSeriesBibleBuildIds = failedSeriesBibleBuildIds,
@@ -278,9 +306,17 @@ fun HomeScreen(
             onFinishWithoutCurrentSegment = { resumeId ->
                 viewModel.finishWithoutCurrentSegment(resumeId)
                 viewModel.closeHistory()
+                selectedDestination = 0
             },
             onMergeNarrationsWithAi = { parts, onStatus ->
                 viewModel.mergeNarrationsWithAi(parts, onStatus)
+            },
+            bottomNavigationContent = {
+                RekapinBottomNavigation(
+                    selectedDestination = selectedDestination,
+                    historyCount = historyList.size,
+                    onSelect = onSelectPrimaryDestination
+                )
             }
         )
         return
@@ -332,58 +368,22 @@ fun HomeScreen(
                         }
                     }
                 },
-                actions = {
-                    // Tombol Riwayat Analisis
-                    IconButton(
-                        onClick = { viewModel.openHistory() },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("btn_open_history")
-                    ) {
-                        if (historyList.isNotEmpty()) {
-                            BadgedBox(
-                                badge = {
-                                    Badge(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ) {
-                                        Text("${historyList.size}")
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.History,
-                                    contentDescription = "Riwayat Analisis",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = "Riwayat Analisis",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    // Tombol Pengaturan API
-                    IconButton(
-                        onClick = { viewModel.openSettings() },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("settings_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Pengaturan",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        bottomBar = {
+            if (analysisState is AnalysisState.Idle ||
+                analysisState is AnalysisState.Success ||
+                analysisState is AnalysisState.Error
+            ) {
+                RekapinBottomNavigation(
+                    selectedDestination = selectedDestination,
+                    historyCount = historyList.size,
+                    onSelect = onSelectPrimaryDestination
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
@@ -658,7 +658,10 @@ fun HomeScreen(
                 isAutoSwitchModel = isAutoSwitchModel,
                 selectedLanguage = narrationLanguage,
                 selectedNarrationMode = narrationMode,
-                onDismiss = { viewModel.closeSettings() },
+                onDismiss = {
+                    viewModel.closeSettings()
+                    selectedDestination = 0
+                },
                 onAddKey = { name, key -> viewModel.addApiKey(name, key) },
                 onRenameKey = { id, newName -> viewModel.renameApiKey(id, newName) },
                 onDeleteKey = { id -> viewModel.deleteApiKey(id) },
@@ -721,6 +724,50 @@ fun HomeScreen(
 }
 
 @Composable
+private fun RekapinBottomNavigation(
+    selectedDestination: Int,
+    historyCount: Int,
+    onSelect: (Int) -> Unit
+) {
+    val destinations = listOf(
+        Triple(Icons.Default.Animation, "Studio", "nav_studio"),
+        Triple(Icons.Default.History, "Riwayat", "btn_open_history"),
+        Triple(Icons.Default.Settings, "Pengaturan", "settings_button")
+    )
+
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp
+    ) {
+        destinations.forEachIndexed { index, (icon, label, testTag) ->
+            NavigationBarItem(
+                selected = selectedDestination == index,
+                onClick = { onSelect(index) },
+                icon = {
+                    if (index == 1 && historyCount > 0) {
+                        BadgedBox(
+                            badge = {
+                                Badge(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ) { Text(historyCount.toString()) }
+                            }
+                        ) {
+                            Icon(icon, contentDescription = label)
+                        }
+                    } else {
+                        Icon(icon, contentDescription = label)
+                    }
+                },
+                label = { Text(label) },
+                alwaysShowLabel = true,
+                modifier = Modifier.testTag(testTag)
+            )
+        }
+    }
+}
+
+@Composable
 private fun IdleSetupContent(
     selectedVideo: SelectedVideo?,
     promptInterval: Int,
@@ -772,30 +819,51 @@ private fun IdleSetupContent(
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp, bottom = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = "RUANG KERJA",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                letterSpacing = 1.4.sp
-            )
-            Text(
-                text = "Mulai rekap baru",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "Pilih video, atur analisis, lalu siapkan cerita.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Animation,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "REKAPIN STUDIO",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        letterSpacing = 1.2.sp
+                    )
+                    Text(
+                        text = "Cerita dimulai dari sini",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "Pilih video anime untuk menyiapkan rekap.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                    )
+                }
+            }
         }
 
         // Banner Lanjutkan Analisis Tertunda jika ada yang belum selesai
@@ -1103,6 +1171,50 @@ private fun IdleSetupContent(
             }
         }
 
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showAdvancedAnalysisOptions = !showAdvancedAnalysisOptions }
+                .testTag("advanced_analysis_options_toggle")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Pengaturan analisis",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Rentang, segmen, visual, dan seri",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (showAdvancedAnalysisOptions) Icons.Default.Close else Icons.Default.ArrowDropDown,
+                    contentDescription = if (showAdvancedAnalysisOptions) "Tutup pengaturan" else "Buka pengaturan",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = showAdvancedAnalysisOptions) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Bagian Rentang Analisis (Hanya tampil setelah video dipilih dan durasi terbaca)
         if (selectedVideo != null && selectedVideo.durationMs > 0) {
             val totalVideoSeconds = (selectedVideo.durationMs / 1000).coerceAtLeast(1L)
@@ -2082,49 +2194,6 @@ private fun IdleSetupContent(
             }
         }
 
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showAdvancedAnalysisOptions = !showAdvancedAnalysisOptions }
-                .testTag("advanced_analysis_options_toggle")
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Opsi lanjutan",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Gaya visual dan pengaturan seri",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Default.ArrowDropDown,
-                    contentDescription = if (showAdvancedAnalysisOptions) "Tutup opsi lanjutan" else "Buka opsi lanjutan",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        AnimatedVisibility(visible = showAdvancedAnalysisOptions) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Pilihan Gaya Visual Prompt
         Text(
             text = "Gaya Visual",

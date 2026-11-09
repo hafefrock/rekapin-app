@@ -79,7 +79,8 @@ fun HistoryScreen(
     getMaxDurationForAnalysis: ((Long) -> Int)? = null,
     failedSeriesBibleBuildIds: Set<Long> = emptySet(),
     seriesBibleBuildInProgressId: Long? = null,
-    onBuildSeriesBibleNow: ((Long) -> Unit)? = null
+    onBuildSeriesBibleNow: ((Long) -> Unit)? = null,
+    bottomNavigationContent: @Composable () -> Unit = {}
 ) {
     // Mode pilih banyak
     var isSelectMode by remember { mutableStateOf(false) }
@@ -194,6 +195,8 @@ fun HistoryScreen(
                         }
                     }
                 }
+            } else {
+                bottomNavigationContent()
             }
         },
         containerColor = MaterialTheme.colorScheme.background
