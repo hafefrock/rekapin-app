@@ -81,6 +81,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -810,7 +811,22 @@ private fun IdleSetupContent(
     val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
-    var showAdvancedAnalysisOptions by remember { mutableStateOf(false) }
+    var studioStep by remember { mutableIntStateOf(0) }
+    val studioStepTitles = listOf("Pilih video", "Rentang analisis", "Segmen & pemotongan", "Gaya & model", "Tinjau rencana")
+
+    LaunchedEffect(selectedVideo?.uri) {
+        if (selectedVideo == null) {
+            studioStep = 0
+        } else if (studioStep == 0) {
+            studioStep = 1
+        }
+    }
+    LaunchedEffect(studioStep) {
+        scrollState.scrollTo(0)
+    }
+    BackHandler(enabled = studioStep > 0) {
+        studioStep = (studioStep - 1).coerceAtLeast(0)
+    }
 
     Column(
         modifier = Modifier
@@ -858,8 +874,14 @@ private fun IdleSetupContent(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Pilih video anime untuk menyiapkan rekap.",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = when (studioStep) {
+                            0 -> "Pilih video anime untuk mulai."
+                            1 -> "Tentukan bagian video yang ingin dianalisis."
+                            2 -> "Atur panjang segmen dan mode pemotongan."
+                            3 -> "Pilih gaya visual dan model Gemini."
+                            else -> "Periksa kembali rencana sebelum analisis."
+                        },
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
                     )
                 }
@@ -867,7 +889,7 @@ private fun IdleSetupContent(
         }
 
         // Banner Lanjutkan Analisis Tertunda jika ada yang belum selesai
-        if (pendingAnalysis != null) {
+        if (pendingAnalysis != null && studioStep == 0) {
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -1009,6 +1031,63 @@ private fun IdleSetupContent(
             }
         }
 
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "LANGKAH ${studioStep + 1} DARI ${studioStepTitles.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 0.8.sp
+                        )
+                        Text(
+                            text = studioStepTitles[studioStep.coerceIn(studioStepTitles.indices)],
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Text(
+                        text = "${studioStep + 1}/${studioStepTitles.size}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { (studioStep + 1).toFloat() / studioStepTitles.size },
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(CircleShape)
+                )
+                if (selectedVideo != null && studioStep > 0) {
+                    Text(
+                        text = selectedVideo.displayName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        if (studioStep == 0) {
         // Section 1: Video Selector
         Text(
             text = "1. Berkas Video Anime",
@@ -1170,53 +1249,10 @@ private fun IdleSetupContent(
                 }
             }
         }
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showAdvancedAnalysisOptions = !showAdvancedAnalysisOptions }
-                .testTag("advanced_analysis_options_toggle")
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Pengaturan analisis",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Rentang, segmen, visual, dan seri",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Icon(
-                    imageVector = if (showAdvancedAnalysisOptions) Icons.Default.Close else Icons.Default.ArrowDropDown,
-                    contentDescription = if (showAdvancedAnalysisOptions) "Tutup pengaturan" else "Buka pengaturan",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
         }
 
-        AnimatedVisibility(visible = showAdvancedAnalysisOptions) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Bagian Rentang Analisis (Hanya tampil setelah video dipilih dan durasi terbaca)
-        if (selectedVideo != null && selectedVideo.durationMs > 0) {
+        if (studioStep == 1 && selectedVideo != null && selectedVideo.durationMs > 0) {
             val totalVideoSeconds = (selectedVideo.durationMs / 1000).coerceAtLeast(1L)
             val currentRangeStart = analysisRangeStartSec.coerceIn(0L, totalVideoSeconds)
             val currentRangeEnd = if (analysisRangeEndSec <= 0L || analysisRangeEndSec > totalVideoSeconds) totalVideoSeconds else analysisRangeEndSec
@@ -1576,8 +1612,21 @@ private fun IdleSetupContent(
                     }
                 }
             }
+        } else if (studioStep == 1 && selectedVideo != null) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Text(
+                    text = "Durasi video belum terbaca. Kembali ke langkah video lalu pilih berkas lain.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
 
+        if (studioStep == 2) {
         // Section 2: Pilihan Panjang Segmen
         Text(
             text = "2. Pilihan Panjang Segmen",
@@ -2194,6 +2243,8 @@ private fun IdleSetupContent(
             }
         }
 
+        }
+        if (studioStep == 3) {
         // Pilihan Gaya Visual Prompt
         Text(
             text = "Gaya Visual",
@@ -2329,7 +2380,7 @@ private fun IdleSetupContent(
                                         }
                                         Text(
                                             text = style.promptDescription,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -2541,11 +2592,10 @@ private fun IdleSetupContent(
                 }
             }
         }
-
-            }
         }
 
-        // Section 4: Ringkasan Rencana Analisis (Tampil sebelum tombol "Analisis" aktif)
+        if (studioStep == 4) {
+        // Section 4: Ringkasan Rencana Analisis
         Text(
             text = "4. Ringkasan Rencana Analisis",
             fontWeight = FontWeight.Bold,
@@ -2591,6 +2641,9 @@ private fun IdleSetupContent(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    ReviewSummaryItem(label = "Video", value = selectedVideo.displayName)
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // 1. Durasi video
                     Row(
@@ -2819,6 +2872,19 @@ private fun IdleSetupContent(
                         }
                     }
 
+                    ReviewSummaryItem(
+                        label = "Mode pemotongan",
+                        value = if (promptCutMode == PromptCutMode.PER_SCENE) {
+                            "Per adegan • ${if (maxSceneDurationSeconds == 0) "tanpa batas" else "$maxSceneDurationSeconds dtk"}"
+                        } else {
+                            "Interval tetap • ${promptInterval} dtk"
+                        }
+                    ) { studioStep = 2 }
+                    ReviewSummaryItem(
+                        label = "Model Gemini",
+                        value = selectedModel.ifBlank { "Belum dipilih" }
+                    ) { studioStep = 3 }
+
                     if (selectedSeriesSourceId != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
@@ -2939,36 +3005,33 @@ private fun IdleSetupContent(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    listOf(
+                        "Video" to 0,
+                        "Rentang" to 1,
+                        "Segmen" to 2,
+                        "Gaya/model" to 3
+                    ).forEachIndexed { index, (label, targetStep) ->
+                        TextButton(
+                            onClick = { studioStep = targetStep },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            modifier = Modifier.testTag("edit_summary_section_$index")
+                        ) {
+                            Text(label, fontSize = 11.sp, maxLines = 1)
+                        }
+                    }
+                }
             }
         }
 
-        // Section 5: Ringkasan Alur Analisis
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "Penyimpanan & Fitur Lanjutkan (Room Database):",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• Hasil tiap segmen otomatis tersimpan ke database lokal begitu selesai.\n" +
-                            "• Jika gagal/terputus di tengah, Anda bisa melanjutkan tanpa mengulang dari awal.\n" +
-                            "• Cek otomatis status berkas AI di Gemini (upload ulang otomatis jika kedaluwarsa).\n" +
-                            "• Semua riwayat tersimpan permanen dan dapat dibuka kapan saja di menu Riwayat.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
-                )
-            }
         }
 
-        // Section 6: Pilihan Model Gemini (Dropdown sebelum tombol Analisis)
+        if (studioStep == 3) {
+        // Pemilihan Model Gemini
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -3140,36 +3203,105 @@ private fun IdleSetupContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Tombol Eksekusi "Mulai Analisis Video"
-        Button(
-            onClick = onStartAnalysis,
-            enabled = (selectedVideo != null),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .testTag("btn_start_analysis")
-        ) {
-            Icon(
-                imageVector = Icons.Default.Animation,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = "Mulai Analisis Video",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
-            )
         }
+
+        if (studioStep == 4) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { studioStep = 3 },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(0.8f)
+                        .height(52.dp)
+                        .testTag("btn_studio_back")
+                ) {
+                    Text("Kembali", fontSize = 12.sp)
+                }
+                Button(
+                    onClick = onStartAnalysis,
+                    enabled = selectedVideo != null,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1.45f)
+                        .height(52.dp)
+                        .testTag("btn_start_analysis")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Animation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Konfirmasi & mulai",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
+        } else if (studioStep in 1..3 || (studioStep == 0 && selectedVideo != null)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { studioStep = (studioStep - 1).coerceAtLeast(0) },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("btn_studio_back")
+                ) {
+                    Text("Kembali", fontSize = 13.sp)
+                }
+                Button(
+                    onClick = { studioStep = (studioStep + 1).coerceAtMost(4) },
+                    enabled = studioStep != 1 || (selectedVideo != null && selectedVideo.durationMs > 0),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("btn_studio_next")
+                ) {
+                    Text("Lanjut", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewSummaryItem(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.9f)
+        )
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1.1f)
+        )
     }
 }
 
