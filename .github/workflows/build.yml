@@ -28,7 +28,10 @@ jobs:
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: gradle connectedDebugAndroidTest --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
+          script: |
+            adb shell settings put global package_verifier_enable 0
+            adb shell settings put global verifier_verify_adb_installs 0
+            gradle connectedDebugAndroidTest --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
         continue-on-error: true
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
