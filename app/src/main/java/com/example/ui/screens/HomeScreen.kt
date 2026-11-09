@@ -2879,11 +2879,11 @@ private fun IdleSetupContent(
                         } else {
                             "Interval tetap • ${promptInterval} dtk"
                         }
-                    ) { studioStep = 2 }
+                    )
                     ReviewSummaryItem(
                         label = "Model Gemini",
                         value = selectedModel.ifBlank { "Belum dipilih" }
-                    ) { studioStep = 3 }
+                    )
 
                     if (selectedSeriesSourceId != null) {
                         Spacer(modifier = Modifier.height(6.dp))
