@@ -823,9 +823,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
-            Log.i(TAG, "Video dipilih dari picker, URI: $uri")
+            Log.i(TAG, "Video dipilih dari picker.")
             val video = withContext(Dispatchers.IO) { loadVideoMetadata(uri) }
-            Log.i(TAG, "Metadata video berhasil dimuat: ${video.displayName}, durasi: ${video.durationFormatted}, ukuran: ${video.sizeFormatted}")
+            Log.i(TAG, "Metadata video berhasil dimuat: durasi ${video.durationFormatted}, ukuran ${video.sizeFormatted}.")
 
             // Cek apakah video ini cocok dengan analisis yang belum selesai di Room database
             val pendingList = try {
@@ -1095,7 +1095,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         retriever.release()
                         durStr?.toLongOrNull() ?: video.durationMs
                     } catch (e: Exception) {
-                        Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+                        Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever (${e.javaClass.simpleName}).")
                         video.durationMs
                     }
                 }
@@ -1331,7 +1331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val initialChars = AnalysisJsonAdapter.jsonToCharacterSheet(sourceEntity.characterSheetJson)
                                 if (initialChars.isNotEmpty()) {
                                     allCharacterSheet.addAll(initialChars)
-                                    Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId (${sourceEntity.videoName}) untuk analisis ID $activeEntityId")
+                                    Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId untuk analisis ID $activeEntityId.")
                                 }
                             }
                         }
@@ -1361,17 +1361,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val remoteState = geminiClient.checkFileRemoteState(remoteFileName)
                     when (remoteState) {
                         GeminiApiClient.RemoteFileState.ACTIVE -> {
-                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih ACTIVE. Siap langsung digunakan kembali.")
+                            Log.i(TAG, "Berkas Gemini masih ACTIVE. Siap langsung digunakan kembali.")
                             needUpload = false
                             needWaitActive = false
                         }
                         GeminiApiClient.RemoteFileState.PROCESSING -> {
-                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih PROCESSING. Melanjutkan tunggu tanpa upload ulang...")
+                            Log.i(TAG, "Berkas Gemini masih PROCESSING. Melanjutkan tunggu tanpa upload ulang...")
                             needUpload = false
                             needWaitActive = true
                         }
                         GeminiApiClient.RemoteFileState.FAILED -> {
-                            Log.e(TAG, "Berkas $remoteFileName di Gemini berstatus FAILED.")
+                            Log.e(TAG, "Berkas Gemini berstatus FAILED.")
                             throw GeminiApiException(
                                 stage = "Verifikasi Status Berkas",
                                 httpCode = null,
@@ -1381,7 +1381,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         GeminiApiClient.RemoteFileState.NOT_FOUND -> {
-                            Log.w(TAG, "Berkas $remoteFileName di Gemini telah kedaluwarsa atau tidak ditemukan (>48 jam). Mengunggah ulang video...")
+                            Log.w(TAG, "Berkas Gemini telah kedaluwarsa atau tidak ditemukan (>48 jam). Mengunggah ulang video...")
                             needUpload = true
                         }
                     }
@@ -1953,7 +1953,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Log.i(TAG, "Mengabaikan error Gemini dari run analisis yang sudah digantikan.")
                     return@launch
                 }
-                Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
+                Log.e(TAG, "GeminiApiException pada [$currentStage], HTTP ${e.httpCode ?: "tidak diketahui"}.")
                 AnalysisForegroundService.stop(context)
                 if (e.isDailyQuota) {
                     val waitTime = if (e.retryDelaySeconds != null && e.retryDelaySeconds > 0) {
@@ -2043,7 +2043,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         (e.message?.contains("requires that you obtain", ignoreCase = true) == true)
 
                 if (isAccessLost) {
-                    Log.w(TAG, "Akses berkas video hilang (SecurityException / FileNotFoundException): ${e.message}")
+                    Log.w(TAG, "Akses berkas video hilang (${e.javaClass.simpleName}).")
                     AnalysisForegroundService.notifyFailed(
                         context = context,
                         stage = "Akses Berkas Video",
@@ -2067,7 +2067,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         modelName = modelStorage.getSelectedModel()
                     )
                 } else {
-                    Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
+                    Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.javaClass.simpleName}.")
                     val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
                     AnalysisForegroundService.notifyFailed(
                         context = context,
@@ -2268,7 +2268,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        Log.w(TAG, "Gagal generate narasi via AI (${e.message}), memakai rangkuman segmen lokal.")
+                        Log.w(TAG, "Gagal generate narasi via AI (${e.javaClass.simpleName}), memakai rangkuman segmen lokal.")
                         summaries.mapIndexed { idx, s ->
                             "Segmen ${idx + 1}: $s"
                         }.joinToString("\n\n")
@@ -2318,7 +2318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: GeminiApiException) {
                 if (!isCurrentRun(runId)) return@launch
-                Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen: ${e.userFriendlyMessage}", e)
+                Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen, HTTP ${e.httpCode ?: "tidak diketahui"}.")
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, e.stage, e.userFriendlyMessage)
                 _analysisState.value = AnalysisState.Error(
@@ -2331,7 +2331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } catch (e: Exception) {
                 if (!isCurrentRun(runId)) return@launch
-                Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.message}", e)
+                Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.javaClass.simpleName}.")
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, "Selesaikan Tanpa Segmen", e.localizedMessage ?: "Gagal")
                 _analysisState.value = AnalysisState.Error(
@@ -2430,12 +2430,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             durationMs = durStr?.toLongOrNull() ?: 0L
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+            Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever (${e.javaClass.simpleName}).")
         } finally {
             try {
                 retriever.release()
             } catch (releaseError: Exception) {
-                Log.w(TAG, "Gagal melepas MediaMetadataRetriever: ${releaseError.message}")
+                Log.w(TAG, "Gagal melepas MediaMetadataRetriever (${releaseError.javaClass.simpleName}).")
             }
         }
 
@@ -2445,7 +2445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (descriptor.length > 0L) sizeBytes = descriptor.length
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal membaca ukuran video dari file descriptor: ${e.message}")
+                Log.w(TAG, "Gagal membaca ukuran video dari file descriptor (${e.javaClass.simpleName}).")
             }
         }
 
