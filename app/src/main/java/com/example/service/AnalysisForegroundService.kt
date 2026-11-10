@@ -82,8 +82,14 @@ class AnalysisForegroundService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Gagal startForeground: ${e.message}", e)
-            // Jangan biarkan service tetap hidup tanpa status foreground yang diwajibkan.
-            stopServiceInternal()
+            try {
+                onCancelRequested?.invoke()
+            } catch (callbackError: Exception) {
+                Log.e(TAG, "Gagal membatalkan analisis setelah startForeground gagal: ${callbackError.message}", callbackError)
+            } finally {
+                // Jangan biarkan analisis berjalan tanpa service foreground.
+                stopServiceInternal()
+            }
         }
 
         return START_NOT_STICKY
@@ -272,6 +278,11 @@ class AnalysisForegroundService : Service() {
                 ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
                 Log.w(TAG, "Gagal memulai AnalysisForegroundService: ${e.message}")
+                try {
+                    onCancelRequested?.invoke()
+                } catch (callbackError: Exception) {
+                    Log.e(TAG, "Gagal membatalkan analisis setelah service gagal dimulai: ${callbackError.message}", callbackError)
+                }
             }
         }
 
