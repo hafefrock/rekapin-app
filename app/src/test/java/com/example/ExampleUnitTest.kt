@@ -338,6 +338,21 @@ class ExampleUnitTest {
         assertTrue(!policy.matches(60_000L, 0L, 60_000L, 50_000_000L))
         assertTrue(!policy.matches(60_000L, 50_000_000L, 0L, 50_000_000L))
         assertTrue(!policy.matches(60_000L, 50_000_000L, 60_000L, 0L))
+
+        // When both fingerprints are available, metadata matches must not override content mismatch.
+        assertTrue(policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "aaa", selectedFingerprint = "aaa"
+        ))
+        assertTrue(!policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "aaa", selectedFingerprint = "bbb"
+        ))
+        // Legacy rows and providers without seek support continue using strict metadata matching.
+        assertTrue(policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "", selectedFingerprint = "bbb"
+        ))
     }
 
     @Test
