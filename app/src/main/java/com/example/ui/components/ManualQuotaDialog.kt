@@ -51,7 +51,7 @@ fun ManualQuotaDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         modifier = Modifier.testTag("dialog_manual_quota"),
         title = {
