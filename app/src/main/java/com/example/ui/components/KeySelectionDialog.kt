@@ -68,6 +68,8 @@ fun KeySelectionDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(20.dp),
         containerColor = MaterialTheme.colorScheme.surface,
+        titleContentColor = MaterialTheme.colorScheme.onSurface,
+        textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
