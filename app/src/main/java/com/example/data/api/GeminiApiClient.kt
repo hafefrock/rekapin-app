@@ -66,10 +66,10 @@ class GeminiApiClient(
         val mimeType = if (video.mimeType.isNotBlank()) video.mimeType else "video/mp4"
 
         Log.i(TAG, "[$stageName] Memulai pengunggahan video di thread: ${Thread.currentThread().name}")
-        Log.i(TAG, "[$stageName] Berkas: ${video.displayName}, Ukuran: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType, URI: ${video.uri}")
+        Log.i(TAG, "[$stageName] Berkas: ${video.displayName}, Ukuran: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType")
 
         // Langkah 1: Inisialisasi Resumable Upload
-        val initUrl = "${GeminiConstants.UPLOAD_ENDPOINT}?key=$apiKey"
+        val initUrl = GeminiConstants.UPLOAD_ENDPOINT
         val metadataJson = JSONObject().apply {
             put("file", JSONObject().apply {
                 put("display_name", video.displayName)
@@ -78,6 +78,7 @@ class GeminiApiClient(
 
         val initRequest = Request.Builder()
             .url(initUrl)
+            .addHeader("x-goog-api-key", apiKey)
             .addHeader("X-Goog-Upload-Protocol", "resumable")
             .addHeader("X-Goog-Upload-Command", "start")
             .addHeader("X-Goog-Upload-Header-Content-Length", video.sizeBytes.toString())
@@ -114,7 +115,7 @@ class GeminiApiClient(
                             rawMessage = "Header x-goog-upload-url tidak ditemukan dalam respons: $errBody",
                             userFriendlyMessage = "Server Google AI tidak mengembalikan alamat URL upload resumable."
                         )
-                    Log.d(TAG, "[$stageName] Sesi resumable upload berhasil dibuat: $url")
+                    Log.d(TAG, "[$stageName] Sesi resumable upload berhasil dibuat.")
                     continuation.resume(url)
                 }
             } catch (e: Exception) {
@@ -219,7 +220,7 @@ class GeminiApiClient(
         val stageName = "Menunggu File ACTIVE"
         val apiKey = getValidApiKey(stageName)
         val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
-        val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
+        val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName"
 
         Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName di thread: ${Thread.currentThread().name}")
         val startTime = System.currentTimeMillis()
@@ -239,6 +240,7 @@ class GeminiApiClient(
 
             val request = Request.Builder()
                 .url(statusUrl)
+                .addHeader("x-goog-api-key", apiKey)
                 .get()
                 .build()
 
@@ -328,10 +330,14 @@ class GeminiApiClient(
         } catch (_: Exception) {
             return@withContext RemoteFileState.NOT_FOUND
         }
-        val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName?key=$apiKey"
+        val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName"
         Log.i(TAG, "[Cek Status Berkas] Memeriksa status terkini $cleanName...")
 
-        val request = Request.Builder().url(statusUrl).get().build()
+        val request = Request.Builder()
+            .url(statusUrl)
+            .addHeader("x-goog-api-key", apiKey)
+            .get()
+            .build()
         try {
             val response = client.newCall(request).execute()
             response.use { res ->
@@ -445,11 +451,12 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent"
 
         val responseJsonString = executeWithRetry(
             stage = stageName,
             url = endpoint,
+            apiKey = apiKey,
             jsonBody = requestPayload,
             modelForCounting = model.trim(),
             onStatusUpdate = onStatusUpdate
@@ -611,10 +618,11 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent"
         val rawResponse = executeWithRetry(
             stage = stageName,
             url = endpoint,
+            apiKey = apiKey,
             jsonBody = requestPayload,
             modelForCounting = model.trim(),
             onStatusUpdate = onStatusUpdate
@@ -742,10 +750,11 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent"
         val rawResponse = executeWithRetry(
             stage = stageName,
             url = endpoint,
+            apiKey = apiKey,
             jsonBody = requestPayload,
             modelForCounting = model.trim(),
             onStatusUpdate = onStatusUpdate
@@ -874,10 +883,11 @@ class GeminiApiClient(
             put("generationConfig", genConfig)
         }.toString()
 
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent?key=$apiKey"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/${model.trim()}:generateContent"
         val rawResponse = executeWithRetry(
             stage = stageName,
             url = endpoint,
+            apiKey = apiKey,
             jsonBody = requestPayload,
             modelForCounting = model.trim(),
             onStatusUpdate = { onStatusUpdate?.invoke(it) }
@@ -923,6 +933,7 @@ class GeminiApiClient(
     private suspend fun executeWithRetry(
         stage: String,
         url: String,
+        apiKey: String,
         jsonBody: String,
         modelForCounting: String? = null,
         onStatusUpdate: (String) -> Unit
@@ -941,6 +952,7 @@ class GeminiApiClient(
 
             val request = Request.Builder()
                 .url(url)
+                .addHeader("x-goog-api-key", apiKey)
                 .addHeader("Content-Type", "application/json; charset=utf-8")
                 .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
@@ -1422,7 +1434,7 @@ $timelineItemSchema
             return@withContext KeyTestResult(false, null, "API Key kosong.")
         }
         val cleanModel = model.trim().ifBlank { GeminiConstants.GEMINI_MODEL }
-        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/$cleanModel:generateContent?key=${apiKey.trim()}"
+        val endpoint = "${GeminiConstants.GENERATE_CONTENT_BASE}/$cleanModel:generateContent"
         val payload = JSONObject().apply {
             val contents = JSONArray().apply {
                 val item = JSONObject().apply {
@@ -1441,6 +1453,7 @@ $timelineItemSchema
 
         val request = Request.Builder()
             .url(endpoint)
+            .addHeader("x-goog-api-key", apiKey.trim())
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
