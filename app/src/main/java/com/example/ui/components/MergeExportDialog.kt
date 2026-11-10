@@ -234,7 +234,7 @@ fun MergeExportDialog(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("btn_copy_merged"),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
@@ -257,7 +257,7 @@ fun MergeExportDialog(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("btn_export_merged_txt"),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
