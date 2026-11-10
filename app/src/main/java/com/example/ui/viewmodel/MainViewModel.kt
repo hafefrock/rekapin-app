@@ -2131,7 +2131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 if (!isMatch) {
-                    Log.w(TAG, "Video yang dipilih berbeda! Durasi beda: ${durationDiffMs}ms, ukuran beda: ${sizeDiffBytes}bytes")
+                    Log.w(TAG, "Video yang dipilih tidak cocok dengan metadata analisis tersimpan; resume dibatalkan.")
                     _analysisState.value = AnalysisState.Error(
                         stage = "Verifikasi Video",
                         httpCode = null,
