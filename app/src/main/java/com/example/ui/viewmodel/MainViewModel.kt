@@ -19,6 +19,7 @@ import com.example.data.model.AnalysisResumePolicy
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.SelectedVideo
+import com.example.data.model.VideoMatchPolicy
 import com.example.data.model.TimelineItem
 import com.example.data.model.ApiKeyItem
 import com.example.data.model.ModelUsageInfo
@@ -866,17 +867,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dur2: Long,
         size2: Long
     ): Boolean {
-        val durationMatches = if (dur1 > 0 && dur2 > 0) {
-            kotlin.math.abs(dur1 - dur2) <= 2000L // toleransi 2 detik
-        } else {
-            true
-        }
-        val sizeMatches = if (size1 > 0 && size2 > 0) {
-            kotlin.math.abs(size1 - size2) <= 2048L || size1 == size2
-        } else {
-            true
-        }
-        return durationMatches && sizeMatches
+        return VideoMatchPolicy.matches(
+            savedDurationMs = dur2,
+            savedSizeBytes = size2,
+            selectedDurationMs = dur1,
+            selectedSizeBytes = size1
+        )
     }
 
     fun resumeMatchedAnalysis() {
@@ -2126,23 +2122,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 Log.i(TAG, "Mencocokkan video: durasi=${selectedDurationMs}ms, ukuran=${selectedSizeBytes}bytes vs tersimpan: durasi=${savedDurationMs}ms, ukuran=${savedSizeBytes}bytes")
 
-                // 1. Cocokkan durasi dengan toleransi 2 detik (2000 ms)
-                val durationDiffMs = kotlin.math.abs(selectedDurationMs - savedDurationMs)
-                val durationMatches = if (savedDurationMs > 0 && selectedDurationMs > 0) {
-                    durationDiffMs <= 2000L
-                } else {
-                    true
-                }
-
-                // 2. Cocokkan ukuran berkas (toleransi wajar)
-                val sizeDiffBytes = kotlin.math.abs(selectedSizeBytes - savedSizeBytes)
-                val sizeMatches = if (savedSizeBytes > 0 && selectedSizeBytes > 0) {
-                    sizeDiffBytes <= 2048L || selectedSizeBytes == savedSizeBytes
-                } else {
-                    true
-                }
-
-                val isMatch = durationMatches && sizeMatches
+                // Resume hanya diizinkan jika metadata tersedia dan cocok secara konservatif.
+                val isMatch = VideoMatchPolicy.matches(
+                    savedDurationMs = savedDurationMs,
+                    savedSizeBytes = savedSizeBytes,
+                    selectedDurationMs = selectedDurationMs,
+                    selectedSizeBytes = selectedSizeBytes
+                )
 
                 if (!isMatch) {
                     Log.w(TAG, "Video yang dipilih berbeda! Durasi beda: ${durationDiffMs}ms, ukuran beda: ${sizeDiffBytes}bytes")
@@ -2176,6 +2162,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     startAnalysis(resumeId = targetId, forceReupload = true)
                 }
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Gagal memproses berkas video yang dipilih: ${e.message}", e)
                 _analysisState.value = AnalysisState.Error(
@@ -2255,6 +2243,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = selectedModelName)
                             }
                         )
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.w(TAG, "Gagal generate narasi via AI (${e.message}), memakai rangkuman segmen lokal.")
                         summaries.mapIndexed { idx, s ->
@@ -2408,23 +2398,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val mimeType = contentResolver.getType(uri) ?: "video/mp4"
 
         var durationMs = 0L
+        val retriever = MediaMetadataRetriever()
         try {
-            val retriever = MediaMetadataRetriever()
             retriever.setDataSource(context, uri)
             val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             durationMs = durStr?.toLongOrNull() ?: 0L
-            retriever.release()
         } catch (e: Exception) {
             Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+        } finally {
+            try {
+                retriever.release()
+            } catch (releaseError: Exception) {
+                Log.w(TAG, "Gagal melepas MediaMetadataRetriever: ${releaseError.message}")
+            }
         }
 
         if (sizeBytes <= 0L) {
             try {
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    sizeBytes = stream.available().toLong()
+                contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                    if (descriptor.length > 0L) sizeBytes = descriptor.length
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal membaca estimasi ukuran video via stream: ${e.message}")
+                Log.w(TAG, "Gagal membaca ukuran video dari file descriptor: ${e.message}")
             }
         }
 
