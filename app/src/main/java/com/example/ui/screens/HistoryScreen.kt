@@ -458,58 +458,62 @@ private fun HistoryItemCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Badges row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Status Badge
+            // Metadata is stacked to remain readable on narrow screens and large font scales.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     if (entity.isCompleted) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .weight(1f, fill = false)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = "Selesai (${entity.totalSegments} Segmen)",
-                                fontSize = 11.sp,
+                                text = "Selesai (\${entity.totalSegments} Segmen)",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     } else {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .weight(1f, fill = false)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.secondaryContainer)
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = "Belum Selesai (Segmen ${entity.completedSegmentsCount}/${entity.totalSegments})",
-                                fontSize = 11.sp,
+                                text = "Belum Selesai (Segmen \${entity.completedSegmentsCount}/\${entity.totalSegments})",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
+                    Spacer(modifier = Modifier.weight(1f))
                     val intervalText = if (entity.intervalSeconds == 0) {
-                        val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
+                        val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "\${maxSceneDuration}s"
                         "Per Adegan ($maxDurText)"
-                    } else "Interval ${entity.intervalSeconds}s"
+                    } else "Interval \${entity.intervalSeconds}s"
                     Text(
                         text = intervalText,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // If not completed, show Resume button right on the card
                 if (!entity.isCompleted) {
                     Button(
                         onClick = onResume,
@@ -517,10 +521,11 @@ private fun HistoryItemCard(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
-                            .height(34.dp)
-                            .testTag("btn_resume_${entity.id}")
+                            .align(Alignment.End)
+                            .heightIn(min = 40.dp)
+                            .testTag("btn_resume_\${entity.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
@@ -529,9 +534,10 @@ private fun HistoryItemCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Lanjut (${entity.completedSegmentsCount + 1})",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "Lanjutkan dari segmen \${entity.completedSegmentsCount + 1}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }
