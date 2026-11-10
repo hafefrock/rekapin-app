@@ -38,8 +38,14 @@ class AnalysisForegroundService : Service() {
 
         if (action == ACTION_CANCEL) {
             Log.i(TAG, "Aksi Batalkan diterima dari notifikasi foreground")
-            onCancelRequested?.invoke()
-            stopServiceInternal()
+            try {
+                onCancelRequested?.invoke()
+            } catch (e: Exception) {
+                Log.e(TAG, "Callback pembatalan analisis gagal: ${e.message}", e)
+            } finally {
+                // Service dan WakeLock tetap harus dibersihkan meskipun callback gagal.
+                stopServiceInternal()
+            }
             return START_NOT_STICKY
         }
 
@@ -76,6 +82,8 @@ class AnalysisForegroundService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Gagal startForeground: ${e.message}", e)
+            // Jangan biarkan service tetap hidup tanpa status foreground yang diwajibkan.
+            stopServiceInternal()
         }
 
         return START_NOT_STICKY
