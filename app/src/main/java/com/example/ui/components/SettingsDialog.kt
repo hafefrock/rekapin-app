@@ -175,6 +175,8 @@ fun SettingsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 2.dp)
             ) {
                 // Tab Navigation: API Key, Model Gemini, Bahasa, Gaya Visual
