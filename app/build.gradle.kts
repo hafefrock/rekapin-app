@@ -54,7 +54,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        // Robolectric fetches android-all outside Gradle's dependency cache.
+        // Use Maven Central's canonical endpoint to reduce repo1 rate-limit failures.
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+        it.systemProperty("robolectric.dependency.repo.id", "mavenCentral")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

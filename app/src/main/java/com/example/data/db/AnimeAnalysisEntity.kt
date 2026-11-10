@@ -1,5 +1,6 @@
 package com.example.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.example.data.model.AnimeAnalysisResult
@@ -33,7 +34,9 @@ data class AnimeAnalysisEntity(
     val segmentPlanJson: String = "[]",
     val segmentDurationMode: String = "AUTO",
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "''")
+    val videoFingerprint: String = ""
 ) {
     val isCompleted: Boolean
         get() = status == "COMPLETED"

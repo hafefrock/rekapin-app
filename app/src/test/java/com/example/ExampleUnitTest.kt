@@ -325,24 +325,34 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testVideoMatchingTolerance() {
-        fun matches(savedDurationMs: Long, savedSize: Long, newDurationMs: Long, newSize: Long): Boolean {
-            val durationDiffMs = kotlin.math.abs(savedDurationMs - newDurationMs)
-            val durationMatches = durationDiffMs <= 2000L // toleransi 2 detik
-            val sizeMatches = savedSize > 0 && savedSize == newSize
-            return durationMatches && sizeMatches
-        }
+    fun testVideoMatchingRequiresKnownMetadataAndExactSize() {
+        val policy = com.example.data.model.VideoMatchPolicy
 
-        // Sama persis
-        assertTrue(matches(60_000L, 50_000_000L, 60_000L, 50_000_000L))
-        // Selisih 1,5 detik (toleransi 2 detik)
-        assertTrue(matches(60_000L, 50_000_000L, 61_500L, 50_000_000L))
-        // Selisih 2 detik pas
-        assertTrue(matches(60_000L, 50_000_000L, 62_000L, 50_000_000L))
-        // Selisih 3 detik (melebihi toleransi)
-        assertTrue(!matches(60_000L, 50_000_000L, 63_000L, 50_000_000L))
-        // Ukuran beda
-        assertTrue(!matches(60_000L, 50_000_000L, 60_000L, 50_000_001L))
+        assertTrue(policy.matches(60_000L, 50_000_000L, 60_000L, 50_000_000L))
+        assertTrue(policy.matches(60_000L, 50_000_000L, 61_500L, 50_000_000L))
+        assertTrue(policy.matches(60_000L, 50_000_000L, 62_000L, 50_000_000L))
+
+        assertTrue(!policy.matches(60_000L, 50_000_000L, 63_000L, 50_000_000L))
+        assertTrue(!policy.matches(60_000L, 50_000_000L, 60_000L, 50_000_001L))
+        assertTrue(!policy.matches(0L, 50_000_000L, 60_000L, 50_000_000L))
+        assertTrue(!policy.matches(60_000L, 0L, 60_000L, 50_000_000L))
+        assertTrue(!policy.matches(60_000L, 50_000_000L, 0L, 50_000_000L))
+        assertTrue(!policy.matches(60_000L, 50_000_000L, 60_000L, 0L))
+
+        // When both fingerprints are available, metadata matches must not override content mismatch.
+        assertTrue(policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "aaa", selectedFingerprint = "aaa"
+        ))
+        assertTrue(!policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "aaa", selectedFingerprint = "bbb"
+        ))
+        // Legacy rows and providers without seek support continue using strict metadata matching.
+        assertTrue(policy.matches(
+            60_000L, 50_000_000L, 60_000L, 50_000_000L,
+            savedFingerprint = "", selectedFingerprint = "bbb"
+        ))
     }
 
     @Test

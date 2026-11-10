@@ -19,6 +19,7 @@ import com.example.data.model.AnalysisResumePolicy
 import com.example.data.model.AnimeAnalysisResult
 import com.example.data.model.CharacterInfo
 import com.example.data.model.SelectedVideo
+import com.example.data.model.VideoMatchPolicy
 import com.example.data.model.TimelineItem
 import com.example.data.model.ApiKeyItem
 import com.example.data.model.ModelUsageInfo
@@ -65,6 +66,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.Locale
 import kotlin.math.ceil
 
@@ -155,7 +159,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal membangun ulang Memori Seri untuk analisis $analysisId: ${e.message}")
+                Log.w(TAG, "Gagal membangun ulang Memori Seri untuk analisis $analysisId (${e.javaClass.simpleName}).")
                 recordSeriesBibleBuildFailure(analysisId)
             } finally {
                 _seriesBibleBuildInProgressId.value = null
@@ -819,20 +823,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onVideoPicked(uri: Uri) {
         viewModelScope.launch {
-            Log.i(TAG, "Video dipilih dari picker, URI: $uri")
+            Log.i(TAG, "Video dipilih dari picker.")
             val video = withContext(Dispatchers.IO) { loadVideoMetadata(uri) }
-            Log.i(TAG, "Metadata video berhasil dimuat: ${video.displayName}, durasi: ${video.durationFormatted}, ukuran: ${video.sizeFormatted}")
+            Log.i(TAG, "Metadata video berhasil dimuat: durasi ${video.durationFormatted}, ukuran ${video.sizeFormatted}.")
 
             // Cek apakah video ini cocok dengan analisis yang belum selesai di Room database
             val pendingList = try {
                 repository.allAnalyses.first()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 historyList.value
             }
 
             val matchedEntity = pendingList.firstOrNull { entity ->
                 !entity.isCompleted && entity.completedSegmentsCount > 0 &&
-                        isSameVideo(video.durationMs, video.sizeBytes, entity.durationMs, entity.videoSizeBytes)
+                        isSameVideo(
+                            selectedDurationMs = video.durationMs,
+                            selectedSizeBytes = video.sizeBytes,
+                            savedDurationMs = entity.durationMs,
+                            savedSizeBytes = entity.videoSizeBytes,
+                            selectedFingerprint = video.fingerprint,
+                            savedFingerprint = entity.videoFingerprint
+                        )
             }
 
             if (matchedEntity != null) {
@@ -861,22 +874,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun isSameVideo(
-        dur1: Long,
-        size1: Long,
-        dur2: Long,
-        size2: Long
+        selectedDurationMs: Long,
+        selectedSizeBytes: Long,
+        savedDurationMs: Long,
+        savedSizeBytes: Long,
+        selectedFingerprint: String = "",
+        savedFingerprint: String = ""
     ): Boolean {
-        val durationMatches = if (dur1 > 0 && dur2 > 0) {
-            kotlin.math.abs(dur1 - dur2) <= 2000L // toleransi 2 detik
-        } else {
-            true
-        }
-        val sizeMatches = if (size1 > 0 && size2 > 0) {
-            kotlin.math.abs(size1 - size2) <= 2048L || size1 == size2
-        } else {
-            true
-        }
-        return durationMatches && sizeMatches
+        return VideoMatchPolicy.matches(
+            savedDurationMs = savedDurationMs,
+            savedSizeBytes = savedSizeBytes,
+            selectedDurationMs = selectedDurationMs,
+            selectedSizeBytes = selectedSizeBytes,
+            savedFingerprint = savedFingerprint,
+            selectedFingerprint = selectedFingerprint
+        )
     }
 
     fun resumeMatchedAnalysis() {
@@ -1083,7 +1095,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         retriever.release()
                         durStr?.toLongOrNull() ?: video.durationMs
                     } catch (e: Exception) {
-                        Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+                        Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever (${e.javaClass.simpleName}).")
                         video.durationMs
                     }
                 }
@@ -1264,6 +1276,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         videoName = video.displayName,
                         videoSizeBytes = video.sizeBytes,
                         durationMs = if (actualDurationMs > 0) actualDurationMs else video.durationMs,
+                        videoFingerprint = video.fingerprint,
                         mimeType = video.mimeType,
                         intervalSeconds = effectiveInterval,
                         totalSegments = totalSegments,
@@ -1318,7 +1331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val initialChars = AnalysisJsonAdapter.jsonToCharacterSheet(sourceEntity.characterSheetJson)
                                 if (initialChars.isNotEmpty()) {
                                     allCharacterSheet.addAll(initialChars)
-                                    Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId (${sourceEntity.videoName}) untuk analisis ID $activeEntityId")
+                                    Log.i(TAG, "Inisialisasi character sheet awal: ${allCharacterSheet.size} karakter dimuat dari seri sumber ID $sourceAnalysisId untuk analisis ID $activeEntityId.")
                                 }
                             }
                         }
@@ -1348,17 +1361,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val remoteState = geminiClient.checkFileRemoteState(remoteFileName)
                     when (remoteState) {
                         GeminiApiClient.RemoteFileState.ACTIVE -> {
-                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih ACTIVE. Siap langsung digunakan kembali.")
+                            Log.i(TAG, "Berkas Gemini masih ACTIVE. Siap langsung digunakan kembali.")
                             needUpload = false
                             needWaitActive = false
                         }
                         GeminiApiClient.RemoteFileState.PROCESSING -> {
-                            Log.i(TAG, "Berkas $remoteFileName di Gemini masih PROCESSING. Melanjutkan tunggu tanpa upload ulang...")
+                            Log.i(TAG, "Berkas Gemini masih PROCESSING. Melanjutkan tunggu tanpa upload ulang...")
                             needUpload = false
                             needWaitActive = true
                         }
                         GeminiApiClient.RemoteFileState.FAILED -> {
-                            Log.e(TAG, "Berkas $remoteFileName di Gemini berstatus FAILED.")
+                            Log.e(TAG, "Berkas Gemini berstatus FAILED.")
                             throw GeminiApiException(
                                 stage = "Verifikasi Status Berkas",
                                 httpCode = null,
@@ -1368,7 +1381,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         GeminiApiClient.RemoteFileState.NOT_FOUND -> {
-                            Log.w(TAG, "Berkas $remoteFileName di Gemini telah kedaluwarsa atau tidak ditemukan (>48 jam). Mengunggah ulang video...")
+                            Log.w(TAG, "Berkas Gemini telah kedaluwarsa atau tidak ditemukan (>48 jam). Mengunggah ulang video...")
                             needUpload = true
                         }
                     }
@@ -1926,8 +1939,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 Log.w(TAG, "Pembaruan otomatis Memori Seri mengembalikan hasil kosong/null untuk analisis $finalActiveEntityId")
                                 recordSeriesBibleBuildFailure(finalActiveEntityId)
                             }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
-                            Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.message}")
+                            Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.javaClass.simpleName}")
                             recordSeriesBibleBuildFailure(finalActiveEntityId)
                         }
                     }
@@ -1938,7 +1953,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Log.i(TAG, "Mengabaikan error Gemini dari run analisis yang sudah digantikan.")
                     return@launch
                 }
-                Log.e(TAG, "GeminiApiException pada [$currentStage]: ${e.userFriendlyMessage}", e)
+                Log.e(TAG, "GeminiApiException pada [$currentStage], HTTP ${e.httpCode ?: "tidak diketahui"}.")
                 AnalysisForegroundService.stop(context)
                 if (e.isDailyQuota) {
                     val waitTime = if (e.retryDelaySeconds != null && e.retryDelaySeconds > 0) {
@@ -2028,7 +2043,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         (e.message?.contains("requires that you obtain", ignoreCase = true) == true)
 
                 if (isAccessLost) {
-                    Log.w(TAG, "Akses berkas video hilang (SecurityException / FileNotFoundException): ${e.message}")
+                    Log.w(TAG, "Akses berkas video hilang (${e.javaClass.simpleName}).")
                     AnalysisForegroundService.notifyFailed(
                         context = context,
                         stage = "Akses Berkas Video",
@@ -2052,7 +2067,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         modelName = modelStorage.getSelectedModel()
                     )
                 } else {
-                    Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.message}", e)
+                    Log.e(TAG, "Kesalahan tidak terduga pada [$currentStage]: ${e.javaClass.simpleName}.")
                     val msg = e.localizedMessage ?: "Terjadi kendala pada sistem."
                     AnalysisForegroundService.notifyFailed(
                         context = context,
@@ -2126,26 +2141,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 Log.i(TAG, "Mencocokkan video: durasi=${selectedDurationMs}ms, ukuran=${selectedSizeBytes}bytes vs tersimpan: durasi=${savedDurationMs}ms, ukuran=${savedSizeBytes}bytes")
 
-                // 1. Cocokkan durasi dengan toleransi 2 detik (2000 ms)
-                val durationDiffMs = kotlin.math.abs(selectedDurationMs - savedDurationMs)
-                val durationMatches = if (savedDurationMs > 0 && selectedDurationMs > 0) {
-                    durationDiffMs <= 2000L
-                } else {
-                    true
-                }
-
-                // 2. Cocokkan ukuran berkas (toleransi wajar)
-                val sizeDiffBytes = kotlin.math.abs(selectedSizeBytes - savedSizeBytes)
-                val sizeMatches = if (savedSizeBytes > 0 && selectedSizeBytes > 0) {
-                    sizeDiffBytes <= 2048L || selectedSizeBytes == savedSizeBytes
-                } else {
-                    true
-                }
-
-                val isMatch = durationMatches && sizeMatches
+                // Resume hanya diizinkan jika metadata tersedia dan cocok secara konservatif.
+                val isMatch = VideoMatchPolicy.matches(
+                    savedDurationMs = savedDurationMs,
+                    savedSizeBytes = savedSizeBytes,
+                    selectedDurationMs = selectedDurationMs,
+                    selectedSizeBytes = selectedSizeBytes,
+                    savedFingerprint = savedEntity.videoFingerprint,
+                    selectedFingerprint = newVideo.fingerprint
+                )
 
                 if (!isMatch) {
-                    Log.w(TAG, "Video yang dipilih berbeda! Durasi beda: ${durationDiffMs}ms, ukuran beda: ${sizeDiffBytes}bytes")
+                    Log.w(TAG, "Video yang dipilih tidak cocok dengan metadata analisis tersimpan; resume dibatalkan.")
                     _analysisState.value = AnalysisState.Error(
                         stage = "Verifikasi Video",
                         httpCode = null,
@@ -2166,6 +2173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         videoName = newVideo.displayName,
                         videoSizeBytes = if (selectedSizeBytes > 0) selectedSizeBytes else savedSizeBytes,
                         durationMs = if (selectedDurationMs > 0) selectedDurationMs else savedDurationMs,
+                        videoFingerprint = newVideo.fingerprint.ifBlank { savedEntity.videoFingerprint },
                         updatedAt = System.currentTimeMillis()
                     )
                     repository.update(updatedEntity)
@@ -2176,8 +2184,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     startAnalysis(resumeId = targetId, forceReupload = true)
                 }
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Gagal memproses berkas video yang dipilih: ${e.message}", e)
+                Log.e(TAG, "Gagal memproses berkas video yang dipilih (${e.javaClass.simpleName}).")
                 _analysisState.value = AnalysisState.Error(
                     stage = "Verifikasi Video",
                     httpCode = null,
@@ -2255,8 +2265,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 _analysisState.value = AnalysisState.GeneratingNarration(msg, modelName = selectedModelName)
                             }
                         )
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
-                        Log.w(TAG, "Gagal generate narasi via AI (${e.message}), memakai rangkuman segmen lokal.")
+                        Log.w(TAG, "Gagal generate narasi via AI (${e.javaClass.simpleName}), memakai rangkuman segmen lokal.")
                         summaries.mapIndexed { idx, s ->
                             "Segmen ${idx + 1}: $s"
                         }.joinToString("\n\n")
@@ -2306,7 +2318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: GeminiApiException) {
                 if (!isCurrentRun(runId)) return@launch
-                Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen: ${e.userFriendlyMessage}", e)
+                Log.e(TAG, "GeminiApiException saat menyelesaikan analisis tanpa segmen, HTTP ${e.httpCode ?: "tidak diketahui"}.")
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, e.stage, e.userFriendlyMessage)
                 _analysisState.value = AnalysisState.Error(
@@ -2319,7 +2331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } catch (e: Exception) {
                 if (!isCurrentRun(runId)) return@launch
-                Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.message}", e)
+                Log.e(TAG, "Kesalahan saat menyelesaikan analisis tanpa segmen: ${e.javaClass.simpleName}.")
                 AnalysisForegroundService.stop(context)
                 AnalysisForegroundService.notifyFailed(context, "Selesaikan Tanpa Segmen", e.localizedMessage ?: "Gagal")
                 _analysisState.value = AnalysisState.Error(
@@ -2354,8 +2366,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal memperbarui status error ke database: ${e.message}")
+            Log.w(TAG, "Gagal memperbarui status error ke database: ${e.javaClass.simpleName}")
         }
     }
 
@@ -2378,6 +2392,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 ResumeCheckResult(false, 1, false)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             ResumeCheckResult(false, 1, false)
         }
@@ -2402,39 +2418,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal query cursor metadata video: ${e.message}")
+            Log.w(TAG, "Gagal query cursor metadata video (${e.javaClass.simpleName}).")
         }
 
         val mimeType = contentResolver.getType(uri) ?: "video/mp4"
 
         var durationMs = 0L
+        val retriever = MediaMetadataRetriever()
         try {
-            val retriever = MediaMetadataRetriever()
             retriever.setDataSource(context, uri)
             val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             durationMs = durStr?.toLongOrNull() ?: 0L
-            retriever.release()
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever: ${e.message}")
+            Log.w(TAG, "Gagal membaca durasi video via MediaMetadataRetriever (${e.javaClass.simpleName}).")
+        } finally {
+            try {
+                retriever.release()
+            } catch (releaseError: Exception) {
+                Log.w(TAG, "Gagal melepas MediaMetadataRetriever (${releaseError.javaClass.simpleName}).")
+            }
         }
 
         if (sizeBytes <= 0L) {
             try {
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    sizeBytes = stream.available().toLong()
+                contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                    if (descriptor.length > 0L) sizeBytes = descriptor.length
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal membaca estimasi ukuran video via stream: ${e.message}")
+                Log.w(TAG, "Gagal membaca ukuran video dari file descriptor (${e.javaClass.simpleName}).")
             }
         }
 
+        val fingerprint = calculateVideoFingerprint(uri, sizeBytes)
         return SelectedVideo(
             uri = uri,
             displayName = displayName,
             sizeBytes = sizeBytes,
             durationMs = durationMs,
-            mimeType = mimeType
+            mimeType = mimeType,
+            fingerprint = fingerprint
         )
+    }
+
+    /**
+     * Hashes small samples from the beginning and end of seekable local content.
+     * This avoids reading an entire multi-GB video just to identify it. Providers
+     * backed by pipes or unknown-length streams may not support seeking; in that
+     * case an empty fingerprint is returned and the metadata policy remains usable.
+     */
+    private fun calculateVideoFingerprint(uri: Uri, knownSizeBytes: Long): String {
+        if (knownSizeBytes <= 0L) return ""
+        return try {
+            val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: return ""
+            descriptor.use { asset ->
+                val length = asset.length.takeIf { it > 0L } ?: knownSizeBytes
+                if (length <= 0L) return ""
+                FileInputStream(asset.fileDescriptor).use { input ->
+                    val channel = input.channel
+                    val sampleSize = minOf(64 * 1024L, length).toInt()
+                    val firstBuffer = ByteBuffer.allocate(sampleSize)
+                    channel.position(asset.startOffset)
+                    while (firstBuffer.hasRemaining()) {
+                        val count = channel.read(firstBuffer)
+                        if (count <= 0) break
+                    }
+                    val first = firstBuffer.array().copyOf(firstBuffer.position())
+
+                    val lastBuffer = ByteBuffer.allocate(sampleSize)
+                    channel.position(asset.startOffset + (length - sampleSize))
+                    while (lastBuffer.hasRemaining()) {
+                        val count = channel.read(lastBuffer)
+                        if (count <= 0) break
+                    }
+                    val last = lastBuffer.array().copyOf(lastBuffer.position())
+
+                    if (first.isEmpty() || last.isEmpty()) return ""
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    digest.update(length.toString().toByteArray(Charsets.UTF_8))
+                    digest.update(first)
+                    digest.update(last)
+                    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Fingerprint video tidak tersedia untuk sumber ini: ${e.javaClass.simpleName}")
+            ""
+        }
     }
 
     private fun formatSeconds(sec: Long): String {
