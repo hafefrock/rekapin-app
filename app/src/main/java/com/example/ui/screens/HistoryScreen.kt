@@ -474,7 +474,7 @@ private fun HistoryItemCard(
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = "Selesai (\${entity.totalSegments} Segmen)",
+                                text = "Selesai (${entity.totalSegments} Segmen)",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary,
@@ -491,7 +491,7 @@ private fun HistoryItemCard(
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = "Belum Selesai (Segmen \${entity.completedSegmentsCount}/\${entity.totalSegments})",
+                                text = "Belum Selesai (Segmen ${entity.completedSegmentsCount}/${entity.totalSegments})",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -502,9 +502,9 @@ private fun HistoryItemCard(
                     }
                     Spacer(modifier = Modifier.weight(1f))
                     val intervalText = if (entity.intervalSeconds == 0) {
-                        val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "\${maxSceneDuration}s"
+                        val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
                         "Per Adegan ($maxDurText)"
-                    } else "Interval \${entity.intervalSeconds}s"
+                    } else "Interval ${entity.intervalSeconds}s"
                     Text(
                         text = intervalText,
                         style = MaterialTheme.typography.labelSmall,
@@ -525,7 +525,7 @@ private fun HistoryItemCard(
                         modifier = Modifier
                             .align(Alignment.End)
                             .heightIn(min = 40.dp)
-                            .testTag("btn_resume_\${entity.id}")
+                            .testTag("btn_resume_${entity.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
@@ -534,7 +534,7 @@ private fun HistoryItemCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Lanjutkan dari segmen \${entity.completedSegmentsCount + 1}",
+                            text = "Lanjutkan dari segmen ${entity.completedSegmentsCount + 1}",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
