@@ -187,7 +187,7 @@ class GeminiApiClient(
                         )
                     }
 
-                    Log.d(TAG, "[$stageName] Respons upload: $respBody")
+                    Log.d(TAG, "[$stageName] Respons upload diterima (${respBody.length} karakter).")
                     val json = JSONObject(respBody)
                     val fileObj = json.optJSONObject("file")
                         ?: throw GeminiApiException(
@@ -199,7 +199,7 @@ class GeminiApiClient(
                     val name = fileObj.getString("name")
                     val uri = fileObj.optString("uri", "https://generativelanguage.googleapis.com/v1beta/$name")
                     val state = fileObj.optString("state", "PROCESSING")
-                    Log.i(TAG, "[$stageName] Upload sukses! Nama: $name, Status Awal: $state, URI: $uri")
+                    Log.i(TAG, "[$stageName] Upload sukses. Status awal: $state.")
                     continuation.resume(UploadedFile(name = name, uri = uri, state = state))
                 }
             } catch (e: Exception) {
@@ -1360,7 +1360,7 @@ $timelineItemSchema
                 timeline = timelineList
             )
         } catch (e: Exception) {
-            Log.e(TAG, "[$stage] Gagal memparsing respons JSON: ${e.message}\nRespons Mentah:\n$rawJson", e)
+            Log.e(TAG, "[$stage] Gagal memparsing respons JSON (${rawJson.length} karakter): ${e.message}", e)
             throw GeminiApiException(
                 stage = stage,
                 httpCode = 200,
