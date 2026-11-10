@@ -66,6 +66,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.Locale
 import kotlin.math.ceil
 
@@ -833,7 +836,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val matchedEntity = pendingList.firstOrNull { entity ->
                 !entity.isCompleted && entity.completedSegmentsCount > 0 &&
-                        isSameVideo(video.durationMs, video.sizeBytes, entity.durationMs, entity.videoSizeBytes)
+                        isSameVideo(
+                            selectedDurationMs = video.durationMs,
+                            selectedSizeBytes = video.sizeBytes,
+                            savedDurationMs = entity.durationMs,
+                            savedSizeBytes = entity.videoSizeBytes,
+                            selectedFingerprint = video.fingerprint,
+                            savedFingerprint = entity.videoFingerprint
+                        )
             }
 
             if (matchedEntity != null) {
@@ -865,13 +875,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dur1: Long,
         size1: Long,
         dur2: Long,
-        size2: Long
+        size2: Long,
+        savedFingerprint: String = "",
+        selectedFingerprint: String = ""
     ): Boolean {
         return VideoMatchPolicy.matches(
             savedDurationMs = dur2,
             savedSizeBytes = size2,
             selectedDurationMs = dur1,
-            selectedSizeBytes = size1
+            selectedSizeBytes = size1,
+            savedFingerprint = savedFingerprint,
+            selectedFingerprint = selectedFingerprint
         )
     }
 
@@ -1260,6 +1274,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         videoName = video.displayName,
                         videoSizeBytes = video.sizeBytes,
                         durationMs = if (actualDurationMs > 0) actualDurationMs else video.durationMs,
+                        videoFingerprint = video.fingerprint,
                         mimeType = video.mimeType,
                         intervalSeconds = effectiveInterval,
                         totalSegments = totalSegments,
@@ -2127,7 +2142,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     savedDurationMs = savedDurationMs,
                     savedSizeBytes = savedSizeBytes,
                     selectedDurationMs = selectedDurationMs,
-                    selectedSizeBytes = selectedSizeBytes
+                    selectedSizeBytes = selectedSizeBytes,
+                    savedFingerprint = savedEntity.videoFingerprint,
+                    selectedFingerprint = newVideo.fingerprint
                 )
 
                 if (!isMatch) {
@@ -2152,6 +2169,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         videoName = newVideo.displayName,
                         videoSizeBytes = if (selectedSizeBytes > 0) selectedSizeBytes else savedSizeBytes,
                         durationMs = if (selectedDurationMs > 0) selectedDurationMs else savedDurationMs,
+                        videoFingerprint = newVideo.fingerprint.ifBlank { savedEntity.videoFingerprint },
                         updatedAt = System.currentTimeMillis()
                     )
                     repository.update(updatedEntity)
@@ -2423,13 +2441,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        val fingerprint = calculateVideoFingerprint(uri, sizeBytes)
         return SelectedVideo(
             uri = uri,
             displayName = displayName,
             sizeBytes = sizeBytes,
             durationMs = durationMs,
-            mimeType = mimeType
+            mimeType = mimeType,
+            fingerprint = fingerprint
         )
+    }
+
+    /**
+     * Hashes small samples from the beginning and end of seekable local content.
+     * This avoids reading an entire multi-GB video just to identify it. Providers
+     * backed by pipes or unknown-length streams may not support seeking; in that
+     * case an empty fingerprint is returned and the metadata policy remains usable.
+     */
+    private fun calculateVideoFingerprint(uri: Uri, knownSizeBytes: Long): String {
+        if (knownSizeBytes <= 0L) return ""
+        return try {
+            val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r") ?: return ""
+            descriptor.use { asset ->
+                val length = asset.length.takeIf { it > 0L } ?: knownSizeBytes
+                if (length <= 0L) return ""
+                FileInputStream(asset.fileDescriptor).use { input ->
+                    val channel = input.channel
+                    val sampleSize = minOf(64 * 1024L, length).toInt()
+                    val firstBuffer = ByteBuffer.allocate(sampleSize)
+                    channel.position(asset.startOffset)
+                    while (firstBuffer.hasRemaining()) {
+                        val count = channel.read(firstBuffer)
+                        if (count <= 0) break
+                    }
+                    val first = firstBuffer.array().copyOf(firstBuffer.position())
+
+                    val lastBuffer = ByteBuffer.allocate(sampleSize)
+                    channel.position(asset.startOffset + (length - sampleSize))
+                    while (lastBuffer.hasRemaining()) {
+                        val count = channel.read(lastBuffer)
+                        if (count <= 0) break
+                    }
+                    val last = lastBuffer.array().copyOf(lastBuffer.position())
+
+                    if (first.isEmpty() || last.isEmpty()) return ""
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    digest.update(length.toString().toByteArray(Charsets.UTF_8))
+                    digest.update(first)
+                    digest.update(last)
+                    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Fingerprint video tidak tersedia untuk sumber ini: ${e.javaClass.simpleName}")
+            ""
+        }
     }
 
     private fun formatSeconds(sec: Long): String {
