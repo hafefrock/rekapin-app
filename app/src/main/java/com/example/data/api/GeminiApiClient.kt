@@ -66,7 +66,7 @@ class GeminiApiClient(
         val mimeType = if (video.mimeType.isNotBlank()) video.mimeType else "video/mp4"
 
         Log.i(TAG, "[$stageName] Memulai pengunggahan video di thread: ${Thread.currentThread().name}")
-        Log.i(TAG, "[$stageName] Berkas: ${video.displayName}, Ukuran: ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType")
+        Log.i(TAG, "[$stageName] Memproses video berukuran ${video.sizeBytes} bytes (${video.sizeFormatted}), MIME: $mimeType.")
 
         // Langkah 1: Inisialisasi Resumable Upload
         val initUrl = GeminiConstants.UPLOAD_ENDPOINT
@@ -222,7 +222,7 @@ class GeminiApiClient(
         val cleanName = if (fileName.startsWith("files/")) fileName else "files/$fileName"
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName"
 
-        Log.i(TAG, "[$stageName] Mulai polling status berkas: $cleanName di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Mulai polling status berkas di thread: ${Thread.currentThread().name}.")
         val startTime = System.currentTimeMillis()
         val maxDurationMs = 15 * 60 * 1000L // 15 menit
         val pollIntervalMs = 5000L // 5 detik
@@ -331,7 +331,7 @@ class GeminiApiClient(
             return@withContext RemoteFileState.NOT_FOUND
         }
         val statusUrl = "https://generativelanguage.googleapis.com/v1beta/$cleanName"
-        Log.i(TAG, "[Cek Status Berkas] Memeriksa status terkini $cleanName...")
+        Log.i(TAG, "[Cek Status Berkas] Memeriksa status terkini berkas Gemini...")
 
         val request = Request.Builder()
             .url(statusUrl)
@@ -478,14 +478,14 @@ class GeminiApiClient(
                 Log.i(TAG, "[$stageName] Hasil coba ulang: didapat ${retryOutput.timeline.size} item.")
                 retryOutput
             } catch (e: Exception) {
-                Log.w(TAG, "[$stageName] Percobaan ulang validasi adegan gagal: ${e.message}, tetap memakai hasil pertama.")
+                Log.w(TAG, "[$stageName] Percobaan ulang validasi adegan gagal (${e.javaClass.simpleName}), tetap memakai hasil pertama.")
                 output
             }
         } else {
             output
         }
 
-        Log.i(TAG, "[$stageName] Berhasil! Ringkasan: \"${finalOutput.segmentSummary.take(60)}...\", Karakter: ${finalOutput.characterSheet.size}, Timeline items: ${finalOutput.timeline.size}")
+        Log.i(TAG, "[$stageName] Berhasil! Karakter: ${finalOutput.characterSheet.size}, Timeline items: ${finalOutput.timeline.size}.")
         finalOutput
     }
 
@@ -805,7 +805,7 @@ class GeminiApiClient(
         val stageName = "Pembaruan Memori Seri"
         val apiKey = getValidApiKey(stageName)
 
-        Log.i(TAG, "[$stageName] Memperbarui memori seri untuk '$videoName' model '$model' di thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[$stageName] Memperbarui memori seri dengan model '$model' di thread: ${Thread.currentThread().name}.")
 
         val previousBibleText = if (previousBible != null && !previousBible.isEmpty()) {
             SeriesBibleStorage.toJson(previousBible)
@@ -918,7 +918,7 @@ class GeminiApiClient(
             }
             null
         } catch (e: Exception) {
-            Log.w(TAG, "[$stageName] Gagal membaca atau memproses respons memori seri: ${e.message}")
+            Log.w(TAG, "[$stageName] Gagal membaca atau memproses respons memori seri (${e.javaClass.simpleName}).")
             null
         }
     }
@@ -1357,7 +1357,7 @@ $timelineItemSchema
                 timeline = timelineList
             )
         } catch (e: Exception) {
-            Log.e(TAG, "[$stage] Gagal memparsing respons JSON (${rawJson.length} karakter): ${e.message}", e)
+            Log.e(TAG, "[$stage] Gagal memparsing respons JSON (${rawJson.length} karakter): ${e.javaClass.simpleName}.")
             throw GeminiApiException(
                 stage = stage,
                 httpCode = 200,
