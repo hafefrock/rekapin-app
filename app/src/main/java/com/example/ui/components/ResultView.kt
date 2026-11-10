@@ -605,41 +605,33 @@ fun ResultView(
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        val intervalDisplay = if (result.intervalSeconds == 0) {
-                            val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration}s"
-                            "Per Adegan ($maxDurLabel)"
-                        } else "${result.intervalSeconds} detik"
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val intervalDisplay = if (result.intervalSeconds == 0) {
+                        val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration}s"
+                        "Per Adegan ($maxDurLabel)"
+                    } else "${result.intervalSeconds} detik"
+                    Text(
+                        text = "Interval Prompt: $intervalDisplay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Mode Narasi: $effectiveModeName",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (languageName.isNotBlank()) {
                         Text(
-                            text = "Interval Prompt: $intervalDisplay",
-                            fontSize = 11.sp,
+                            text = "Bahasa: $languageName",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Mode Narasi: $effectiveModeName",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        if (languageName.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Bahasa: $languageName",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                     Text(
                         text = "${result.totalSegments} Segmen • ${result.durationFormatted}",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
                     )
                 }
             }
