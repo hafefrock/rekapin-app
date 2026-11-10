@@ -292,7 +292,7 @@ fun KeySelectionDialog(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_add_and_use_new_key")
                     ) {
                         Icon(
