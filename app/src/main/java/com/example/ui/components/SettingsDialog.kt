@@ -448,7 +448,7 @@ fun SettingsDialog(
                                                 },
                                                 enabled = (testingKeyId == null),
                                                 modifier = Modifier
-                                                    .size(32.dp)
+                                                    .size(48.dp)
                                                     .testTag("btn_test_key_${item.id}")
                                             ) {
                                                 if (isTesting) {
@@ -471,7 +471,7 @@ fun SettingsDialog(
                                         IconButton(
                                             onClick = { keyToRename = item },
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("btn_rename_key_${item.id}")
                                         ) {
                                             Icon(
@@ -485,7 +485,7 @@ fun SettingsDialog(
                                         IconButton(
                                             onClick = { keyToDelete = item },
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("btn_delete_key_${item.id}")
                                         ) {
                                             Icon(
@@ -695,7 +695,7 @@ fun SettingsDialog(
                                         IconButton(
                                             onClick = { modelToEditQuota = model },
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(48.dp)
                                                 .testTag("btn_edit_quota_$index")
                                         ) {
                                             Icon(
@@ -712,7 +712,7 @@ fun SettingsDialog(
                                         onClick = { modelToDelete = model },
                                         enabled = models.size > 1,
                                         modifier = Modifier
-                                            .size(32.dp)
+                                            .size(48.dp)
                                             .testTag("btn_delete_model_$index")
                                     ) {
                                         Icon(
