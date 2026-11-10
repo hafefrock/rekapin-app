@@ -207,4 +207,39 @@ class ExampleRobolectricTest {
         db.close()
         context.deleteDatabase("test_migration.db")
     }
+
+    @Test
+    fun `test migration 4 to 5 adds video fingerprint without losing existing rows`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val helper = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(
+            androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name("test_migration_4_5.db")
+                .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(4) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE anime_analyses (id INTEGER PRIMARY KEY NOT NULL, videoName TEXT NOT NULL)"
+                        )
+                        db.execSQL("INSERT INTO anime_analyses (id, videoName) VALUES (7, 'Episode 07.mp4')")
+                    }
+
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) {}
+                })
+                .build()
+        )
+
+        val db = helper.writableDatabase
+        AppDatabase.MIGRATION_4_5.migrate(db)
+
+        val cursor = db.query("SELECT videoName, videoFingerprint FROM anime_analyses WHERE id = 7")
+        assertTrue(cursor.moveToFirst())
+        assertEquals("Episode 07.mp4", cursor.getString(0))
+        assertEquals("", cursor.getString(1))
+        cursor.close()
+        db.close()
+        context.deleteDatabase("test_migration_4_5.db")
+    }
 }
