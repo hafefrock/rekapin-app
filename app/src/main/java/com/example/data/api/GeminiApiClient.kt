@@ -446,7 +446,6 @@ class GeminiApiClient(
 
             val genConfig = JSONObject().apply {
                 put("responseMimeType", "application/json")
-                put("temperature", 0.3)
             }
             put("generationConfig", genConfig)
         }.toString()
@@ -614,7 +613,6 @@ class GeminiApiClient(
             put("contents", contentsArray)
 
             val genConfig = JSONObject().apply {
-                put("temperature", 0.7)
             }
             put("generationConfig", genConfig)
         }.toString()
@@ -746,7 +744,6 @@ class GeminiApiClient(
             put("contents", contentsArray)
 
             val genConfig = JSONObject().apply {
-                put("temperature", 0.7)
             }
             put("generationConfig", genConfig)
         }.toString()
@@ -879,7 +876,6 @@ class GeminiApiClient(
 
             val genConfig = JSONObject().apply {
                 put("responseMimeType", "application/json")
-                put("temperature", 0.3)
             }
             put("generationConfig", genConfig)
         }.toString()
