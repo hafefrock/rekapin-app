@@ -1,5 +1,6 @@
 name: Build and Test APK
-on: [push, workflow_dispatch]
+on:
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
