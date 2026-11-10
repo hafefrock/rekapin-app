@@ -7,7 +7,8 @@ data class SelectedVideo(
     val displayName: String,
     val sizeBytes: Long,
     val durationMs: Long,
-    val mimeType: String
+    val mimeType: String,
+    val fingerprint: String = ""
 ) {
     val sizeFormatted: String
         get() {
