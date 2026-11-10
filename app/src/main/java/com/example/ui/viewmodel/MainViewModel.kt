@@ -830,6 +830,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Cek apakah video ini cocok dengan analisis yang belum selesai di Room database
             val pendingList = try {
                 repository.allAnalyses.first()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 historyList.value
             }
@@ -1937,8 +1939,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 Log.w(TAG, "Pembaruan otomatis Memori Seri mengembalikan hasil kosong/null untuk analisis $finalActiveEntityId")
                                 recordSeriesBibleBuildFailure(finalActiveEntityId)
                             }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
-                            Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.message}")
+                            Log.w(TAG, "Gagal memperbarui memori seri secara otomatis (dilewati): ${e.javaClass.simpleName}")
                             recordSeriesBibleBuildFailure(finalActiveEntityId)
                         }
                     }
@@ -2362,8 +2366,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal memperbarui status error ke database: ${e.message}")
+            Log.w(TAG, "Gagal memperbarui status error ke database: ${e.javaClass.simpleName}")
         }
     }
 
@@ -2386,6 +2392,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 ResumeCheckResult(false, 1, false)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             ResumeCheckResult(false, 1, false)
         }
