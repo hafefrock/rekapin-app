@@ -458,7 +458,9 @@ fun HomeScreen(
                             styleName = state.styleName,
                             narrationModeName = state.result.narrationMode.ifBlank { narrationMode.displayName },
                             languageName = narrationLanguage.displayName,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxSize()
                         )
                     }
                 }
