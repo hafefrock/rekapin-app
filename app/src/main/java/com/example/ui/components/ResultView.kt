@@ -1463,7 +1463,7 @@ private fun SectionHeader(
                 onClick = onCopy,
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
-                    .height(34.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("btn_copy_section_${stepLabel.take(1)}")
             ) {
                 Icon(
@@ -1516,7 +1516,7 @@ private fun NarrationCard(
                 IconButton(
                     onClick = onCopy,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(48.dp)
                         .testTag("copy_narration_button")
                 ) {
                     Icon(
@@ -1643,7 +1643,7 @@ private fun TimelineCard(
                 IconButton(
                     onClick = onCopyPrompt,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(48.dp)
                         .testTag("copy_prompt_button_$index")
                 ) {
                     Icon(
