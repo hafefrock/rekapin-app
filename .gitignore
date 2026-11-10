@@ -17,3 +17,7 @@ local.properties
 .env
 debug.keystore
 github-artifacts/
+
+# Never commit Android signing credentials.
+*.jks
+*.keystore
