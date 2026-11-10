@@ -190,6 +190,7 @@ class AnalysisForegroundService : Service() {
 
     private fun stopServiceInternal() {
         releaseWakeLock()
+        onCancelRequested = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -203,6 +204,7 @@ class AnalysisForegroundService : Service() {
         super.onDestroy()
         if (activeInstance === this) {
             activeInstance = null
+            onCancelRequested = null
         }
         releaseWakeLock()
         Log.i(TAG, "AnalysisForegroundService dihentikan")
@@ -282,6 +284,8 @@ class AnalysisForegroundService : Service() {
                     onCancelRequested?.invoke()
                 } catch (callbackError: Exception) {
                     Log.e(TAG, "Gagal membatalkan analisis setelah service gagal dimulai: ${callbackError.message}", callbackError)
+                } finally {
+                    onCancelRequested = null
                 }
             }
         }
