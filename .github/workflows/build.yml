@@ -35,13 +35,34 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash .github/scripts/run-instrumentation-tests.sh
+      - name: Configure release signing
+        id: release-signing
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/rekapin-release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/rekapin-release.jks" >> "$GITHUB_ENV"
+            echo "STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release signing secrets are not configured. Only a debug APK will be built."
+          fi
+      - name: Build signed release APK
+        if: steps.release-signing.outputs.available == 'true'
+        run: gradle assembleRelease --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
       - name: Build debug APK
+        if: steps.release-signing.outputs.available != 'true'
         run: gradle assembleDebug --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: rekapin-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: ${{ steps.release-signing.outputs.available == 'true' && 'rekapin-release-apk' || 'rekapin-debug-apk' }}
+          path: ${{ steps.release-signing.outputs.available == 'true' && 'app/build/outputs/apk/release/*.apk' || 'app/build/outputs/apk/debug/*.apk' }}
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
@@ -59,4 +80,6 @@ jobs:
           name: Rekapin test build ${{ github.run_number }}
           prerelease: true
           generate_release_notes: true
-          files: app/build/outputs/apk/debug/*.apk
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
