@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -972,7 +973,7 @@ private fun IdleSetupContent(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_resume_pending_home")
                     ) {
                         Icon(
@@ -995,7 +996,7 @@ private fun IdleSetupContent(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_finish_without_segment_home")
                     ) {
                         Icon(
@@ -1264,7 +1265,7 @@ private fun IdleSetupContent(
                             onClick = onSelectVideoClicked,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .height(40.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("btn_change_video")
                         ) {
                             Text("Ganti Video", fontSize = 12.sp)
@@ -1628,7 +1629,7 @@ private fun IdleSetupContent(
                             },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
-                                .height(36.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("btn_reset_full_video")
                         ) {
                             Text("Pilih Seluruh Video", fontSize = 11.sp)
@@ -3127,7 +3128,7 @@ private fun IdleSetupContent(
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             modifier = Modifier
-                                .height(32.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("btn_manual_adjust_quota")
                         ) {
                             Text(
@@ -3600,7 +3601,7 @@ private fun ProgressContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(44.dp)
+                                    .heightIn(min = 48.dp)
                                     .testTag("btn_skip_scene_detection")
                             ) {
                                 Icon(
@@ -3638,7 +3639,7 @@ private fun ProgressContent(
                     onClick = onCancel,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
-                        .height(44.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("btn_cancel_analysis")
                 ) {
                     Text("Batalkan Analisis", fontSize = 13.sp)
@@ -3916,7 +3917,7 @@ private fun ErrorContent(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_error_back")
                     ) {
                         Text("Kembali ke Beranda", fontSize = 12.sp)
@@ -3963,7 +3964,7 @@ private fun ErrorContent(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(44.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("btn_copy_error_detail")
                         ) {
                             Icon(
@@ -4242,7 +4243,7 @@ private fun ErrorContent(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_error_back")
                     ) {
                         Text("Kembali ke Beranda", fontSize = 12.sp)
