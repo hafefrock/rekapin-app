@@ -9,11 +9,9 @@ jobs:
         with: {distribution: temurin, java-version: 17}
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: 9.3.1}
-      - run: echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
       - name: Run unit tests
         id: unit-tests
         run: gradle testDebugUnitTest --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
-        continue-on-error: true
       - name: Run Android instrumentation tests
         id: instrumentation-tests
         uses: ReactiveCircus/android-emulator-runner@v2
@@ -28,31 +26,20 @@ jobs:
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            for attempt in 1 2 3 4 5; do
-              if adb shell settings put global package_verifier_enable 0 && adb shell settings put global verifier_verify_adb_installs 0; then
-                break
-              fi
-              if [ "$attempt" -eq 5 ]; then exit 1; fi
-              adb wait-for-device || true
-              sleep 5
-            done
-            gradle connectedDebugAndroidTest --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
-        continue-on-error: true
+          script: bash .github/scripts/run-instrumentation-tests.sh
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: rekapin-apk
           path: app/build/outputs/apk/debug/*.apk
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: rekapin-test-results
           path: |
             app/build/test-results/testDebugUnitTest/*.xml
             app/build/outputs/androidTest-results/connected/**/*.xml
           if-no-files-found: ignore
-      - name: Mark workflow failed if any test suite failed
-        if: steps.unit-tests.outcome == 'failure' || steps.instrumentation-tests.outcome == 'failure'
-        run: exit 1
