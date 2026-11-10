@@ -574,6 +574,9 @@ fun HomeScreen(
         pendingMatchDialogState?.let { matchState ->
             AlertDialog(
                 onDismissRequest = { viewModel.dismissPendingMatchDialog() },
+                shape = RoundedCornerShape(20.dp),
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
                 icon = {
                     Icon(
                         imageVector = Icons.Default.History,
@@ -634,6 +637,10 @@ fun HomeScreen(
             val failedVideoName = historyList.firstOrNull { it.id == analysisId }?.videoName.orEmpty()
             AlertDialog(
                 onDismissRequest = { viewModel.dismissSeriesBibleBuildFailureNotice() },
+                shape = RoundedCornerShape(20.dp),
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 title = { Text("Memori Seri belum diperbarui", fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
