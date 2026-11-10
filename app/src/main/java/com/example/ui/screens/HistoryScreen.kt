@@ -308,7 +308,7 @@ fun HistoryScreen(
         itemToDelete?.let { target ->
             AlertDialog(
                 onDismissRequest = { itemToDelete = null },
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 containerColor = MaterialTheme.colorScheme.surface,
                 title = {
                     Text(
