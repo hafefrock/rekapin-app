@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -657,7 +658,7 @@ fun ResultView(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .weight(1f)
-                    .height(46.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("btn_copy_all_results")
             ) {
                 Icon(
@@ -687,7 +688,7 @@ fun ResultView(
                 ),
                 modifier = Modifier
                     .weight(1f)
-                    .height(46.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("btn_export_txt")
             ) {
                 Icon(
@@ -1374,7 +1375,7 @@ private fun TimelineActionRow(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier
                 .weight(1f)
-                .height(40.dp)
+                .heightIn(min = 48.dp)
                 .testTag("btn_copy_timeline_section")
         ) {
             Icon(
@@ -1401,7 +1402,7 @@ private fun TimelineActionRow(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier
                 .weight(1.35f)
-                .height(40.dp)
+                .heightIn(min = 48.dp)
                 .testTag("btn_copy_all_visual_prompts")
         ) {
             Icon(
