@@ -1,7 +1,7 @@
 name: Build and Test APK
 on: [push, workflow_dispatch]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: rekapin-main-build
   cancel-in-progress: true
@@ -57,6 +57,14 @@ jobs:
         with:
           name: rekapin-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+      - name: Publish GitHub pre-release (debug APK)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-${{ github.run_number }}
+          name: Rekapin Beta ${{ github.run_number }}
+          prerelease: true
+          generate_release_notes: true
+          files: app/build/outputs/apk/debug/*.apk
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
