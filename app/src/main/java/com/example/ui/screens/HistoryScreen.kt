@@ -525,7 +525,7 @@ private fun HistoryItemCard(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .align(Alignment.End)
-                            .heightIn(min = 40.dp)
+                            .heightIn(min = 48.dp)
                             .testTag("btn_resume_${entity.id}")
                     ) {
                         Icon(
@@ -557,7 +557,7 @@ private fun HistoryItemCard(
                     enabled = !isBuildingSeriesBible,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
-                        .height(38.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("btn_build_series_bible_${entity.id}")
                 ) {
                     Text(
