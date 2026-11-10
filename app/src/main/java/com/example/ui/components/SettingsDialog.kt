@@ -73,7 +73,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -411,14 +410,14 @@ fun SettingsDialog(
                                                     modifier = Modifier
                                                         .clip(RoundedCornerShape(6.dp))
                                                         .background(
-                                                            if (isOk) Color(0xFF1B3820) else Color(0xFF381B1B)
+                                                            if (isOk) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer
                                                         )
                                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = if (isOk) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
                                                         contentDescription = null,
-                                                        tint = if (isOk) Color(0xFF4CAF50) else Color(0xFFEF5350),
+                                                        tint = if (isOk) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                                                         modifier = Modifier.size(11.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
@@ -426,7 +425,7 @@ fun SettingsDialog(
                                                         text = msg,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Medium,
-                                                        color = if (isOk) Color(0xFF81C784) else Color(0xFFEF9A9A),
+                                                        color = if (isOk) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                                                         lineHeight = 13.sp
                                                     )
                                                 }
@@ -1875,7 +1874,7 @@ private fun AddKeyDialog(
                                 text = msg,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = if (isOk) Color(0xFF81C784) else Color(0xFFEF9A9A),
+                                color = if (isOk) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.weight(1f),
                                 maxLines = 2
                             )
