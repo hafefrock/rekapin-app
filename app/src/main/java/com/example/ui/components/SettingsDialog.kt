@@ -1406,7 +1406,12 @@ fun SettingsDialog(
                 )
             },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     OutlinedTextField(
                         value = styleInputName,
                         onValueChange = { styleInputName = it },
@@ -1771,7 +1776,12 @@ private fun AddKeyDialog(
             Text("Tambah API Key", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = nameInput,
                     onValueChange = { nameInput = it },
