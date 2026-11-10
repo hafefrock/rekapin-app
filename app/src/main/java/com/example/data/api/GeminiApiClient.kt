@@ -95,7 +95,7 @@ class GeminiApiClient(
                 response.use { res ->
                     val errBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
-                        Log.e(TAG, "[$stageName] Inisialisasi upload gagal. HTTP ${res.code}: $errBody")
+                        Log.e(TAG, "[$stageName] Inisialisasi upload gagal. HTTP ${res.code}; panjang respons ${errBody.length} karakter.")
                         val quotaCheck = QuotaHelper.checkQuotaError(res.code, errBody)
                         throw GeminiApiException(
                             stage = stageName,
@@ -174,7 +174,7 @@ class GeminiApiClient(
                 response.use { res ->
                     val respBody = res.body?.string().orEmpty()
                     if (!res.isSuccessful) {
-                        Log.e(TAG, "[$stageName] Finalisasi upload gagal. HTTP ${res.code}: $respBody")
+                        Log.e(TAG, "[$stageName] Finalisasi upload gagal. HTTP ${res.code}; panjang respons ${respBody.length} karakter.")
                         val quotaCheck = QuotaHelper.checkQuotaError(res.code, respBody)
                         throw GeminiApiException(
                             stage = stageName,
@@ -252,7 +252,7 @@ class GeminiApiClient(
                     response.use { res ->
                         val respBody = res.body?.string().orEmpty()
                         if (!res.isSuccessful) {
-                            Log.e(TAG, "[$stageName] Gagal memeriksa status berkas. HTTP ${res.code}: $respBody")
+                            Log.e(TAG, "[$stageName] Gagal memeriksa status berkas. HTTP ${res.code}; panjang respons ${respBody.length} karakter.")
                             val quotaCheck = QuotaHelper.checkQuotaError(res.code, respBody)
                             throw GeminiApiException(
                                 stage = stageName,
@@ -1031,7 +1031,7 @@ class GeminiApiClient(
                         }
                         continue
                     } else {
-                        Log.e(TAG, "[$stage] Auto-retry maksimal ($maxRetries kali) habis setelah HTTP $statusCode: $responseBody")
+                        Log.e(TAG, "[$stage] Auto-retry maksimal ($maxRetries kali) habis setelah HTTP $statusCode; panjang respons ${responseBody.length} karakter.")
                         throw GeminiApiException(
                             stage = stage,
                             httpCode = statusCode,
@@ -1048,7 +1048,7 @@ class GeminiApiClient(
                 }
 
                 // HTTP error lainnya (400, 401, 403, dll) JANGAN di-retry
-                Log.e(TAG, "[$stage] Permintaan API gagal tanpa retry. HTTP $statusCode: $responseBody")
+                Log.e(TAG, "[$stage] Permintaan API gagal tanpa retry. HTTP $statusCode; panjang respons ${responseBody.length} karakter.")
                 throw GeminiApiException(
                     stage = stage,
                     httpCode = statusCode,
