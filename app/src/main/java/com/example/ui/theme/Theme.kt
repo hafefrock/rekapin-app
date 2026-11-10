@@ -5,14 +5,14 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val RekapinDarkColorScheme = darkColorScheme(
-    primary = OrangePrimary,
-    onPrimary = OrangeOnPrimary,
-    primaryContainer = OrangePrimaryContainer,
-    onPrimaryContainer = OrangeOnPrimaryContainer,
-    secondary = OrangeSecondary,
-    onSecondary = OrangeOnSecondary,
-    secondaryContainer = OrangeSecondaryContainer,
-    onSecondaryContainer = OrangeOnSecondaryContainer,
+    primary = VioletPrimary,
+    onPrimary = VioletOnPrimary,
+    primaryContainer = VioletPrimaryContainer,
+    onPrimaryContainer = VioletOnPrimaryContainer,
+    secondary = VioletSecondary,
+    onSecondary = VioletOnSecondary,
+    secondaryContainer = VioletSecondaryContainer,
+    onSecondaryContainer = VioletOnSecondaryContainer,
     tertiary = CyanAccent,
     onTertiary = CyanOnTertiary,
     background = GunmetalBackground,
