@@ -872,18 +872,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun isSameVideo(
-        dur1: Long,
-        size1: Long,
-        dur2: Long,
-        size2: Long,
-        savedFingerprint: String = "",
-        selectedFingerprint: String = ""
+        selectedDurationMs: Long,
+        selectedSizeBytes: Long,
+        savedDurationMs: Long,
+        savedSizeBytes: Long,
+        selectedFingerprint: String = "",
+        savedFingerprint: String = ""
     ): Boolean {
         return VideoMatchPolicy.matches(
-            savedDurationMs = dur2,
-            savedSizeBytes = size2,
-            selectedDurationMs = dur1,
-            selectedSizeBytes = size1,
+            savedDurationMs = savedDurationMs,
+            savedSizeBytes = savedSizeBytes,
+            selectedDurationMs = selectedDurationMs,
+            selectedSizeBytes = selectedSizeBytes,
             savedFingerprint = savedFingerprint,
             selectedFingerprint = selectedFingerprint
         )
