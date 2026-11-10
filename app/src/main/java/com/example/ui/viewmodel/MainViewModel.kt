@@ -159,7 +159,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal membangun ulang Memori Seri untuk analisis $analysisId: ${e.message}")
+                Log.w(TAG, "Gagal membangun ulang Memori Seri untuk analisis $analysisId (${e.javaClass.simpleName}).")
                 recordSeriesBibleBuildFailure(analysisId)
             } finally {
                 _seriesBibleBuildInProgressId.value = null
@@ -2187,7 +2187,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Gagal memproses berkas video yang dipilih: ${e.message}", e)
+                Log.e(TAG, "Gagal memproses berkas video yang dipilih (${e.javaClass.simpleName}).")
                 _analysisState.value = AnalysisState.Error(
                     stage = "Verifikasi Video",
                     httpCode = null,
@@ -2418,7 +2418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal query cursor metadata video: ${e.message}")
+            Log.w(TAG, "Gagal query cursor metadata video (${e.javaClass.simpleName}).")
         }
 
         val mimeType = contentResolver.getType(uri) ?: "video/mp4"
