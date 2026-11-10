@@ -577,15 +577,23 @@ fun ResultView(
     ) {
         // Ringkasan hasil: judul kuat dan metadata tetap ringkas.
         Card(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier
                 .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
                 .padding(bottom = 10.dp)
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)
             ) {
+                Text(
+                    text = "ANALYSIS REPORT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    letterSpacing = 1.4.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 if (result.videoName.isNotBlank()) {
                     Text(
                         text = result.videoName,
@@ -736,7 +744,7 @@ fun ResultView(
         // Tab Navigation
         ScrollableTabRow(
             selectedTabIndex = safeSelectedTab,
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             contentColor = MaterialTheme.colorScheme.primary,
             edgePadding = 12.dp,
             indicator = { tabPositions ->
