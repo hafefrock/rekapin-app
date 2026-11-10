@@ -470,6 +470,7 @@ class GeminiApiClient(
                 val retryJson = executeWithRetry(
                     stage = "$stageName (Coba Ulang Validasi Adegan)",
                     url = endpoint,
+                    apiKey = apiKey,
                     jsonBody = requestPayload,
                     modelForCounting = model.trim(),
                     onStatusUpdate = onStatusUpdate
