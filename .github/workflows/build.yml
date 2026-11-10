@@ -1,5 +1,7 @@
 name: Build APK
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -49,3 +51,12 @@ jobs:
             app/build/test-results/testDebugUnitTest/*.xml
             app/build/outputs/androidTest-results/connected/**/*.xml
           if-no-files-found: ignore
+      - name: Publish APK as GitHub pre-release
+        if: success() && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rekapin-build-${{ github.run_number }}
+          name: Rekapin test build ${{ github.run_number }}
+          prerelease: true
+          generate_release_notes: true
+          files: app/build/outputs/apk/debug/*.apk
