@@ -623,7 +623,7 @@ fun HistoryDetailScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .padding(end = 6.dp)
-                                    .height(36.dp)
+                                    .heightIn(min = 48.dp)
                             ) {
                                 Text(
                                     text = "Selesaikan",
@@ -641,7 +641,7 @@ fun HistoryDetailScreen(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .padding(end = 8.dp)
-                                .height(36.dp)
+                                .heightIn(min = 48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
