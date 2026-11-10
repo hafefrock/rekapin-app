@@ -338,39 +338,47 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primary)
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Animation,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(22.dp)
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text(
                                 text = stringResource(id = R.string.app_name),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Studio rekap anime",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "CINEMATIC RECAP STUDIO",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                letterSpacing = 1.1.sp,
+                                maxLines = 1
                             )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
@@ -737,7 +745,8 @@ private fun RekapinBottomNavigation(
     )
 
     NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp
     ) {
         destinations.forEachIndexed { index, (icon, label, testTag) ->
