@@ -1394,7 +1394,10 @@ fun SettingsDialog(
     if (showStyleDialog) {
         AlertDialog(
             onDismissRequest = { showStyleDialog = false },
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = {
                 Text(
                     text = if (isEditingStyle) "Ubah Gaya Visual" else "Tambah Gaya Visual Sendiri",
@@ -1487,7 +1490,10 @@ fun SettingsDialog(
     styleToDelete?.let { targetStyle ->
         AlertDialog(
             onDismissRequest = { styleToDelete = null },
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = {
                 Text("Hapus Gaya Visual", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             },
@@ -1554,7 +1560,10 @@ fun SettingsDialog(
     keyToDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { keyToDelete = null },
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = {
                 Text("Hapus API Key?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             },
@@ -1607,7 +1616,10 @@ fun SettingsDialog(
     modelToDelete?.let { modelName ->
         AlertDialog(
             onDismissRequest = { modelToDelete = null },
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             title = {
                 Text("Hapus Model?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             },
@@ -1673,7 +1685,10 @@ private fun AddCustomModelDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         title = {
             Text("Tambah Model Gemini", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         },
@@ -1748,7 +1763,10 @@ private fun AddKeyDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         title = {
             Text("Tambah API Key", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         },
@@ -1896,7 +1914,10 @@ private fun RenameKeyDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         title = {
             Text("Ganti Nama API Key", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         },
