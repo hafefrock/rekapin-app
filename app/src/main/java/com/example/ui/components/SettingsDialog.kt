@@ -121,7 +121,12 @@ fun SettingsDialog(
     isAutoBuildSeriesBible: Boolean = true,
     onToggleAutoBuildSeriesBible: ((Boolean) -> Unit)? = null,
     isPrependRecapNarration: Boolean = false,
-    onTogglePrependRecapNarration: ((Boolean) -> Unit)? = null
+    onTogglePrependRecapNarration: ((Boolean) -> Unit)? = null,
+    isAutoSkipOpEd: Boolean = true,
+    onToggleAutoSkipOpEd: ((Boolean) -> Unit)? = null,
+    isDetectRepeatedScenes: Boolean = true,
+    onToggleDetectRepeatedScenes: ((Boolean) -> Unit)? = null,
+    isKeyDecryptFailed: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -307,6 +312,54 @@ fun SettingsDialog(
                         lineHeight = 15.sp
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    if (isKeyDecryptFailed && apiKeys.isEmpty()) {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp)
+                                .testTag("card_key_decrypt_failed_notice")
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Kunci API Tidak Terbaca",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "API key yang tersimpan tidak dapat dibuka di perangkat ini. Masukkan ulang key Anda.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    lineHeight = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = { showAddKeyDialog = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("btn_reenter_key_in_settings")
+                                ) {
+                                    Text("Masukkan Ulang", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
 
                     if (apiKeys.isEmpty()) {
                         Box(
@@ -1277,98 +1330,193 @@ fun SettingsDialog(
                 }
 
                 if (selectedTab == 4) {
-                    // TAB 4: Memori Seri (Series Bible)
-                    Text(
-                        text = "Kelola otomatisasi memori seri untuk menjaga konsistensi nama, lokasi, istilah, dan relasi antarepisode.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 15.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Switch 1: Bangun memori seri otomatis
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                    // TAB 4: Memori Seri (Series Bible) & Deteksi
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState())
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        Text(
+                            text = "Kelola otomatisasi memori seri untuk menjaga konsistensi nama, lokasi, istilah, dan relasi antarepisode.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 15.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Switch 1: Bangun memori seri otomatis
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(
-                                    text = "Bangun memori seri otomatis",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Memakai 1 permintaan tambahan ke Gemini per analisis. Memperbarui daftar lokasi, istilah, relasi, dan ringkasan episode.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 15.sp
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Bangun memori seri otomatis",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Memakai 1 permintaan tambahan ke Gemini per analisis. Memperbarui daftar lokasi, istilah, relasi, dan ringkasan episode.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = isAutoBuildSeriesBible,
+                                    onCheckedChange = { onToggleAutoBuildSeriesBible?.invoke(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier.testTag("switch_auto_build_series_bible")
                                 )
                             }
-                            Switch(
-                                checked = isAutoBuildSeriesBible,
-                                onCheckedChange = { onToggleAutoBuildSeriesBible?.invoke(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier.testTag("switch_auto_build_series_bible")
-                            )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    // Switch 2: Tambahkan recap 'Sebelumnya...' di awal narasi
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        // Switch 2: Tambahkan recap 'Sebelumnya...' di awal narasi
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(
-                                    text = "Tambahkan recap 'Sebelumnya...' di awal narasi",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Menyertakan 2-3 kalimat kilas balik dari episode sebelumnya di awal narasi rekap (bebas spoiler).",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 15.sp
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Tambahkan recap 'Sebelumnya...' di awal narasi",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Menyertakan 2-3 kalimat kilas balik dari episode sebelumnya di awal narasi rekap (bebas spoiler).",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = isPrependRecapNarration,
+                                    onCheckedChange = { onTogglePrependRecapNarration?.invoke(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier.testTag("switch_prepend_recap_narration")
                                 )
                             }
-                            Switch(
-                                checked = isPrependRecapNarration,
-                                onCheckedChange = { onTogglePrependRecapNarration?.invoke(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier.testTag("switch_prepend_recap_narration")
-                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Switch 3: Lewati OP/ED otomatis (hanya saat Seri dipilih)
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Lewati OP/ED otomatis (hanya saat Seri dipilih)",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Mendeteksi visual OP/ED dari episode acuan dalam seri yang sama dan memotongnya dari rentang analisis.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = isAutoSkipOpEd,
+                                    onCheckedChange = { onToggleAutoSkipOpEd?.invoke(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier.testTag("switch_auto_skip_op_ed")
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Switch 4: Cari adegan berulang (menambah waktu persiapan)
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Cari adegan berulang (menambah waktu persiapan)",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Memindai kemiripan visual antarsegmen untuk mendeteksi flashback atau adegan berulang secara lokal.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = isDetectRepeatedScenes,
+                                    onCheckedChange = { onToggleDetectRepeatedScenes?.invoke(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier.testTag("switch_detect_repeated_scenes")
+                                )
+                            }
                         }
                     }
                 }

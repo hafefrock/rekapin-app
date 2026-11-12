@@ -137,8 +137,14 @@ object RepeatedSceneDetector {
             .take(MAX_RESULTS)
     }
 
+    internal fun isInformative(hash: Long): Boolean {
+        val ones = java.lang.Long.bitCount(hash)
+        return ones in 8..56
+    }
+
     private fun similar(first: Long, second: Long): Boolean =
-        java.lang.Long.bitCount(first xor second) <= MAX_HASH_DISTANCE
+        isInformative(first) && isInformative(second) &&
+            java.lang.Long.bitCount(first xor second) <= MAX_HASH_DISTANCE
 
     private fun key(first: Int, second: Int): Long = (first.toLong() shl 32) or (second.toLong() and 0xffffffffL)
 

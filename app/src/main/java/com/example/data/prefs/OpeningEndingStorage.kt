@@ -32,8 +32,28 @@ class OpeningEndingStorage(context: Context) {
         prefs.edit().putString(analysisId.toString(), root.toString()).apply()
     }
 
+    fun isAutoSkipOpEd(): Boolean = prefs.getBoolean(KEY_AUTO_SKIP_OP_ED, true)
+
+    fun setAutoSkipOpEd(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_SKIP_OP_ED, enabled).apply()
+    }
+
+    fun getSkipNote(analysisId: Long): String? =
+        prefs.getString(KEY_SKIP_NOTE_PREFIX + analysisId, null)
+
+    fun saveSkipNote(analysisId: Long, note: String) {
+        prefs.edit().putString(KEY_SKIP_NOTE_PREFIX + analysisId, note).apply()
+    }
+
+    fun removeSkipNote(analysisId: Long) {
+        prefs.edit().remove(KEY_SKIP_NOTE_PREFIX + analysisId).apply()
+    }
+
     fun remove(analysisId: Long) {
-        prefs.edit().remove(analysisId.toString()).apply()
+        prefs.edit()
+            .remove(analysisId.toString())
+            .remove(KEY_SKIP_NOTE_PREFIX + analysisId)
+            .apply()
     }
 
     private fun writeFrames(frames: List<FrameFingerprint>): JSONArray = JSONArray().apply {
@@ -59,5 +79,7 @@ class OpeningEndingStorage(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "rekapin_opening_ending_prefs"
+        private const val KEY_AUTO_SKIP_OP_ED = "auto_skip_op_ed"
+        private const val KEY_SKIP_NOTE_PREFIX = "skip_note_"
     }
 }

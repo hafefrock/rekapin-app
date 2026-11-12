@@ -183,9 +183,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.i(TAG, "Pengaturan recap 'Sebelumnya...' di awal narasi diubah: $enabled")
     }
 
+    // Pengaturan Lewati OP/ED Otomatis
+    private val _isAutoSkipOpEd = MutableStateFlow(openingEndingStorage.isAutoSkipOpEd())
+    val isAutoSkipOpEd: StateFlow<Boolean> = _isAutoSkipOpEd.asStateFlow()
+
+    fun toggleAutoSkipOpEd(enabled: Boolean) {
+        openingEndingStorage.setAutoSkipOpEd(enabled)
+        _isAutoSkipOpEd.value = enabled
+        Log.i(TAG, "Pengaturan lewati OP/ED otomatis diubah: $enabled")
+    }
+
+    // Pengaturan Cari Adegan Berulang
+    private val _isDetectRepeatedScenes = MutableStateFlow(repeatedSceneStorage.isDetectRepeatedScenes())
+    val isDetectRepeatedScenes: StateFlow<Boolean> = _isDetectRepeatedScenes.asStateFlow()
+
+    fun toggleDetectRepeatedScenes(enabled: Boolean) {
+        repeatedSceneStorage.setDetectRepeatedScenes(enabled)
+        _isDetectRepeatedScenes.value = enabled
+        Log.i(TAG, "Pengaturan cari adegan berulang diubah: $enabled")
+    }
+
+    // Status Dekripsi API Key Gagal
+    private val _showKeyDecryptFailedDialog = MutableStateFlow(false)
+    val showKeyDecryptFailedDialog: StateFlow<Boolean> = _showKeyDecryptFailedDialog.asStateFlow()
+
+    fun dismissKeyDecryptFailedDialog() {
+        _showKeyDecryptFailedDialog.value = false
+    }
+
+    fun checkKeyDecryptionState() {
+        val keys = apiKeyStorage.getAllKeys()
+        if (apiKeyStorage.keyDecryptFailed && keys.isEmpty()) {
+            _showKeyDecryptFailedDialog.value = true
+        }
+    }
+
+    init {
+        checkKeyDecryptionState()
+    }
+
     fun getSeriesBibleForAnalysis(id: Long): SeriesBible? = seriesBibleStorage.getBible(id)
     fun getContinuityWarningsForAnalysis(id: Long): List<String> = continuityWarningStorage.get(id)
     fun getRepeatedSceneNotesForAnalysis(id: Long): List<String> = repeatedSceneStorage.get(id)
+    fun getOpeningEndingSkipNoteForAnalysis(id: Long): String? = openingEndingStorage.getSkipNote(id)
 
     private val geminiClient = GeminiApiClient(
         apiKeyProvider = { apiKeyStorage.getEffectiveApiKey() },
@@ -626,10 +666,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshApiKeys() {
         _apiKeys.value = apiKeyStorage.getAllKeys()
         _activeKeyName.value = apiKeyStorage.getActiveKeyName()
+        if (_apiKeys.value.isNotEmpty()) {
+            _showKeyDecryptFailedDialog.value = false
+        }
     }
 
     fun addApiKey(name: String, key: String) {
         apiKeyStorage.addKey(name, key)
+        _showKeyDecryptFailedDialog.value = false
         refreshApiKeys()
         Log.i(TAG, "API Key baru '$name' ditambahkan")
     }
@@ -1119,9 +1163,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     configuredRangeEndSec
                 }
                 var repeatedSceneMatches: List<RepeatedSceneMatch> = emptyList()
+                var activeOpEdSkipNote: String? = null
 
                 // Local-only OP/ED matching is applied to new analyses only; saved resume plans stay unchanged.
-                if (existingEntity == null) {
+                if (existingEntity == null && _isAutoSkipOpEd.value) {
                     val sourceAnalysisId = _selectedSeriesSourceId.value
                     if (sourceAnalysisId != null) {
                         try {
@@ -1143,12 +1188,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val skips = OpeningEndingDetector.findSkips(template!!, currentFingerprint, totalSeconds)
                                 val adjustedStart = maxOf(effectiveRangeStartSec, skips.openingEndSec ?: effectiveRangeStartSec)
                                 val adjustedEnd = minOf(effectiveRangeEndSec, skips.endingStartSec ?: effectiveRangeEndSec)
-                                if (adjustedEnd - adjustedStart >= SegmentCalculator.MIN_RANGE_SECONDS) {
+                                if (adjustedEnd - adjustedStart >= SegmentCalculator.MIN_RANGE_SECONDS &&
+                                    (skips.openingEndSec != null || skips.endingStartSec != null)
+                                ) {
                                     effectiveRangeStartSec = adjustedStart
                                     effectiveRangeEndSec = adjustedEnd
                                     _analysisRangeStartSec.value = adjustedStart
                                     _analysisRangeEndSec.value = adjustedEnd
-                                    Log.i(TAG, "OP/ED berulang terdeteksi secara lokal; rentang analisis disetel ke ${formatSeconds(adjustedStart)}-${formatSeconds(adjustedEnd)}")
+                                    val skipParts = mutableListOf<String>()
+                                    if (skips.openingEndSec != null) {
+                                        skipParts += "OP dilewati sampai ${formatSeconds(skips.openingEndSec)}"
+                                    }
+                                    if (skips.endingStartSec != null) {
+                                        skipParts += "ED mulai ${formatSeconds(skips.endingStartSec)}"
+                                    }
+                                    val skipDesc = skipParts.joinToString(", ")
+                                    _analysisState.value = AnalysisState.Preparing(skipDesc)
+                                    activeOpEdSkipNote = "Rentang yang dilewati: $skipDesc"
+                                    Log.i(TAG, "OP/ED berulang terdeteksi secara lokal; $skipDesc; rentang analisis disetel ke ${formatSeconds(adjustedStart)}-${formatSeconds(adjustedEnd)}")
                                 }
                             } else if (template == null && currentFingerprint != null) {
                                 // If the source file is no longer readable, use this episode as the local template.
@@ -1162,7 +1219,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                if (existingEntity == null) {
+                if (existingEntity == null && _isDetectRepeatedScenes.value) {
                     try {
                         _analysisState.value = AnalysisState.Preparing("Mencari adegan berulang secara lokal...")
                         repeatedSceneMatches = RepeatedSceneDetector.detect(
@@ -1297,6 +1354,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     activeAnalysisId = activeEntityId
                     if (repeatedSceneMatches.isNotEmpty()) {
                         repeatedSceneStorage.save(activeEntityId, repeatedSceneMatches.map { it.toUserMessage() })
+                    }
+                    if (!activeOpEdSkipNote.isNullOrBlank()) {
+                        openingEndingStorage.saveSkipNote(activeEntityId, activeOpEdSkipNote)
                     }
                     visualStyleStorage.saveStyleForAnalysis(activeEntityId, activeStyle)
                     narrationModeStorage.saveModeForAnalysis(activeEntityId, activeMode)
@@ -1878,12 +1938,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val currentBible = (activeEntityId?.let { seriesBibleStorage.getBible(it) }) ?: activeSeriesBible
                 val repeatedSceneNotes = activeEntityId?.let { repeatedSceneStorage.get(it) }.orEmpty()
                     .ifEmpty { repeatedSceneMatches.map { it.toUserMessage() } }
+                val opEdSkipNote = (activeEntityId?.let { openingEndingStorage.getSkipNote(it) }) ?: activeOpEdSkipNote
                 val analysisNotes = mutableListOf<String>()
                 continuityWarnings.distinct().takeIf { it.isNotEmpty() }?.let { warnings ->
                     analysisNotes += "Pemeriksa kontinuitas karakter menemukan perbedaan yang perlu ditinjau:\n- ${warnings.joinToString("\n- ")}"
                 }
                 repeatedSceneNotes.takeIf { it.isNotEmpty() }?.let { notes ->
                     analysisNotes += "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- ${notes.joinToString("\n- ")}"
+                }
+                opEdSkipNote?.takeIf { it.isNotBlank() }?.let { note ->
+                    analysisNotes += note
                 }
                 val finalResult = AnimeAnalysisResult(
                     narration = narration,

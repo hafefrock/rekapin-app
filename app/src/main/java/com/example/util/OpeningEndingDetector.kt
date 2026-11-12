@@ -91,6 +91,11 @@ object OpeningEndingDetector {
         else OpeningEndingFingerprint(opening, ending)
     }
 
+    internal fun isInformative(hash: Long): Boolean {
+        val ones = java.lang.Long.bitCount(hash)
+        return ones in 8..56
+    }
+
     /** Finds a long, ordered run of visually similar frames in both likely OP and ED windows. */
     fun findSkips(
         template: OpeningEndingFingerprint,
@@ -98,9 +103,15 @@ object OpeningEndingDetector {
         currentDurationSec: Long
     ): OpeningEndingSkip {
         val opening = longestOrderedRun(template.openingFrames, current.openingFrames)
-            ?.takeIf { it.second - it.first + 1 >= MIN_MATCH_FRAMES }
+            ?.takeIf { run ->
+                (run.second - run.first + 1 >= MIN_MATCH_FRAMES) &&
+                    (run.first..run.second).count { isInformative(current.openingFrames[it].hash) } >= MIN_MATCH_FRAMES
+            }
         val ending = longestOrderedRun(template.endingFrames, current.endingFrames)
-            ?.takeIf { it.second - it.first + 1 >= MIN_MATCH_FRAMES }
+            ?.takeIf { run ->
+                (run.second - run.first + 1 >= MIN_MATCH_FRAMES) &&
+                    (run.first..run.second).count { isInformative(current.endingFrames[it].hash) } >= MIN_MATCH_FRAMES
+            }
 
         val openingEndSec = opening?.let { current.openingFrames[it.second].timeSec + SAMPLE_STEP_SECONDS }
             ?.coerceAtMost(currentDurationSec)
@@ -128,16 +139,21 @@ object OpeningEndingDetector {
             var bestEarlierTemplateRun = 0
             val hasContiguousPreviousFrame = currentIndex > 0 &&
                 current[currentIndex].timeSec - current[currentIndex - 1].timeSec == SAMPLE_STEP_SECONDS
+            val currentHash = current[currentIndex].hash
+            val currentInformative = isInformative(currentHash)
             for (templateIndex in template.indices) {
                 if (hasContiguousPreviousFrame && templateIndex > 0) {
                     bestEarlierTemplateRun = maxOf(bestEarlierTemplateRun, previous[templateIndex - 1])
                 }
-                val distance = java.lang.Long.bitCount(template[templateIndex].hash xor current[currentIndex].hash)
-                if (distance <= MAX_HASH_DISTANCE) {
-                    next[templateIndex] = bestEarlierTemplateRun + 1
-                    if (next[templateIndex] > bestLength) {
-                        bestLength = next[templateIndex]
-                        bestCurrentEnd = currentIndex
+                val templateHash = template[templateIndex].hash
+                if (currentInformative && isInformative(templateHash)) {
+                    val distance = java.lang.Long.bitCount(templateHash xor currentHash)
+                    if (distance <= MAX_HASH_DISTANCE) {
+                        next[templateIndex] = bestEarlierTemplateRun + 1
+                        if (next[templateIndex] > bestLength) {
+                            bestLength = next[templateIndex]
+                            bestCurrentEnd = currentIndex
+                        }
                     }
                 }
             }

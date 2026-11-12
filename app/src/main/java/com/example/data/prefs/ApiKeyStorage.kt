@@ -81,6 +81,9 @@ class ApiKeyStorage internal constructor(
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    var keyDecryptFailed: Boolean = false
+        private set
+
     init {
         migrateExistingKeyIfNeeded()
     }
@@ -88,8 +91,15 @@ class ApiKeyStorage internal constructor(
     /** Migrates legacy plaintext preferences once; secrets are only deleted after encryption succeeds. */
     @Synchronized
     private fun migrateExistingKeyIfNeeded() {
-        if (!prefs.getString(KEY_API_KEYS_ENCRYPTED, null).isNullOrBlank()) {
-            removeLegacyPlaintextKeys()
+        val existingEncrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        if (!existingEncrypted.isNullOrBlank()) {
+            val testDecrypt = cipher.decrypt(existingEncrypted)
+            if (testDecrypt != null) {
+                keyDecryptFailed = false
+                removeLegacyPlaintextKeys()
+            } else {
+                keyDecryptFailed = true
+            }
             return
         }
 
@@ -129,21 +139,69 @@ class ApiKeyStorage internal constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Migrasi API key lama ke penyimpanan terenkripsi gagal.", e)
             }
-        } else {
-            removeLegacyPlaintextKeys()
         }
+    }
+
+    private fun getLegacyPlaintextKeys(): List<ApiKeyItem> {
+        val legacyJson = prefs.getString(KEY_API_KEYS_JSON, null)
+        if (!legacyJson.isNullOrBlank()) {
+            val oldKeys = parseKeysJson(legacyJson)
+            if (oldKeys.isNotEmpty()) return oldKeys
+        }
+        val legacyKey = prefs.getString(KEY_GEMINI_API_KEY, null)?.trim().orEmpty()
+        if (legacyKey.isNotBlank()) {
+            return listOf(ApiKeyItem(name = "Key 1", key = legacyKey, isActive = true))
+        }
+        return emptyList()
+    }
+
+    fun hasStoredKeysThatCannotBeDecrypted(): Boolean {
+        val encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        return !encrypted.isNullOrBlank() && keyDecryptFailed && getAllKeys().isEmpty()
     }
 
     @Synchronized
     fun getAllKeys(): List<ApiKeyItem> {
-        var encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
-        if (encrypted.isNullOrBlank()) {
-            migrateExistingKeyIfNeeded()
-            encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        val encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        if (!encrypted.isNullOrBlank()) {
+            val json = cipher.decrypt(encrypted)
+            if (json != null) {
+                keyDecryptFailed = false
+                removeLegacyPlaintextKeys()
+                return parseKeysJson(json)
+            } else {
+                keyDecryptFailed = true
+                Log.e(TAG, "Gagal mendekripsi data API key dari KeyStore.")
+                val legacy = getLegacyPlaintextKeys()
+                if (legacy.isNotEmpty()) {
+                    return legacy
+                }
+                return emptyList()
+            }
         }
-        if (encrypted.isNullOrBlank()) return emptyList()
-        val json = cipher.decrypt(encrypted) ?: return emptyList()
-        return parseKeysJson(json)
+
+        migrateExistingKeyIfNeeded()
+        val postMigrate = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
+        if (!postMigrate.isNullOrBlank()) {
+            val json = cipher.decrypt(postMigrate)
+            if (json != null) {
+                keyDecryptFailed = false
+                removeLegacyPlaintextKeys()
+                return parseKeysJson(json)
+            } else {
+                keyDecryptFailed = true
+                val legacy = getLegacyPlaintextKeys()
+                if (legacy.isNotEmpty()) {
+                    return legacy
+                }
+                return emptyList()
+            }
+        }
+
+        val legacy = getLegacyPlaintextKeys()
+        if (legacy.isNotEmpty()) return legacy
+
+        return emptyList()
     }
 
     @Synchronized
@@ -254,6 +312,7 @@ class ApiKeyStorage internal constructor(
             .remove(KEY_API_KEYS_JSON)
             .remove(KEY_GEMINI_API_KEY)
             .apply()
+        keyDecryptFailed = false
     }
 
     private fun removeLegacyPlaintextKeys() {

@@ -577,6 +577,7 @@ fun HistoryDetailScreen(
     seriesBible: com.example.data.model.SeriesBible? = null,
     continuityWarnings: List<String> = emptyList(),
     repeatedSceneNotes: List<String> = emptyList(),
+    opEdSkipNote: String? = null,
     onBack: () -> Unit,
     onResume: () -> Unit,
     onFinishWithoutCurrentSegment: (() -> Unit)? = null
@@ -675,8 +676,10 @@ fun HistoryDetailScreen(
                 separator = "\n",
                 prefix = "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- "
             )?.replace("\n", "\n- ") ?: ""
-            val combinedNote = listOf(baseResult.note, continuityNote, repeatedSceneNote)
+            val opEdNote = opEdSkipNote?.takeIf { it.isNotBlank() } ?: ""
+            val combinedNote = listOf(baseResult.note, continuityNote, repeatedSceneNote, opEdNote)
                 .filter { it.isNotBlank() }
+                .distinct()
                 .joinToString("\n\n")
             val result = baseResult.copy(note = combinedNote)
             ResultView(

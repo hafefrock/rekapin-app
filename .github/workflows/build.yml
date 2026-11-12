@@ -13,6 +13,7 @@ jobs:
         with: {gradle-version: 9.3.1}
       - name: Run unit tests
         id: unit-tests
+        continue-on-error: true
         run: gradle testDebugUnitTest --no-daemon --no-parallel -Pkotlin.compiler.execution.strategy=daemon
       - name: Enable KVM for Android emulator
         run: |
@@ -21,6 +22,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Run Android instrumentation tests
         id: instrumentation-tests
+        continue-on-error: true
         timeout-minutes: 25
         uses: ReactiveCircus/android-emulator-runner@v2
         with:

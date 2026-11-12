@@ -33,7 +33,14 @@ class RepeatedSceneStorage(context: Context) {
         prefs.edit().remove(analysisId.toString()).apply()
     }
 
+    fun isDetectRepeatedScenes(): Boolean = prefs.getBoolean(KEY_DETECT_REPEATED_SCENES, true)
+
+    fun setDetectRepeatedScenes(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DETECT_REPEATED_SCENES, enabled).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "rekapin_repeated_scene_prefs"
+        private const val KEY_DETECT_REPEATED_SCENES = "detect_repeated_scenes"
     }
 }

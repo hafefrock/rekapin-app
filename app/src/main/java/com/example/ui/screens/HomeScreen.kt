@@ -119,6 +119,19 @@ import com.example.data.model.PromptCutMode
 import com.example.data.model.SelectedVideo
 import com.example.data.model.VisualStyle
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.material3.NavigationBarItemDefaults
+import com.example.ui.components.ChoiceChips
+import com.example.ui.components.CollapsibleSection
+import com.example.ui.components.PrimaryActionBar
+import com.example.ui.components.RekapinCard
+import com.example.ui.components.SectionHeader
+import com.example.ui.components.SettingRow
+import com.example.ui.theme.RekapinBorders
+import com.example.ui.theme.RekapinRadii
+import com.example.ui.theme.RekapinSpacing
+import com.example.ui.theme.RekapinTypography
 import com.example.ui.components.KeySelectionDialog
 import com.example.ui.components.ManualQuotaDialog
 import com.example.ui.components.ResultView
@@ -163,6 +176,9 @@ fun HomeScreen(
     val failedSeriesBibleBuildIds by viewModel.failedSeriesBibleBuildIds.collectAsState()
     val seriesBibleBuildFailureNotice by viewModel.seriesBibleBuildFailureNotice.collectAsState()
     val seriesBibleBuildInProgressId by viewModel.seriesBibleBuildInProgressId.collectAsState()
+    val isAutoSkipOpEd by viewModel.isAutoSkipOpEd.collectAsState()
+    val isDetectRepeatedScenes by viewModel.isDetectRepeatedScenes.collectAsState()
+    val showKeyDecryptFailedDialog by viewModel.showKeyDecryptFailedDialog.collectAsState()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
@@ -265,6 +281,7 @@ fun HomeScreen(
             seriesBible = viewModel.getSeriesBibleForAnalysis(historyEntity.id),
             continuityWarnings = viewModel.getContinuityWarningsForAnalysis(historyEntity.id),
             repeatedSceneNotes = viewModel.getRepeatedSceneNotesForAnalysis(historyEntity.id),
+            opEdSkipNote = viewModel.getOpeningEndingSkipNoteForAnalysis(historyEntity.id),
             onBack = { viewModel.closeHistoryDetail() },
             onResume = {
                 requestNotificationAndStart {
@@ -687,7 +704,67 @@ fun HomeScreen(
                 isAutoBuildSeriesBible = isAutoBuildSeriesBible,
                 onToggleAutoBuildSeriesBible = { viewModel.toggleAutoBuildSeriesBible(it) },
                 isPrependRecapNarration = isPrependRecapNarration,
-                onTogglePrependRecapNarration = { viewModel.togglePrependRecapNarration(it) }
+                onTogglePrependRecapNarration = { viewModel.togglePrependRecapNarration(it) },
+                isAutoSkipOpEd = isAutoSkipOpEd,
+                onToggleAutoSkipOpEd = { viewModel.toggleAutoSkipOpEd(it) },
+                isDetectRepeatedScenes = isDetectRepeatedScenes,
+                onToggleDetectRepeatedScenes = { viewModel.toggleDetectRepeatedScenes(it) },
+                isKeyDecryptFailed = showKeyDecryptFailedDialog
+            )
+        }
+
+        if (showKeyDecryptFailedDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissKeyDecryptFailedDialog() },
+                shape = RoundedCornerShape(20.dp),
+                containerColor = MaterialTheme.colorScheme.surface,
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Kunci API Tidak Terbaca",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                text = {
+                    Text(
+                        text = "API key yang tersimpan tidak dapat dibuka di perangkat ini. Masukkan ulang key Anda.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.dismissKeyDecryptFailedDialog()
+                            viewModel.openSettings()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier.testTag("btn_reenter_api_key_dialog")
+                    ) {
+                        Text("Masukkan Ulang", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { viewModel.dismissKeyDecryptFailedDialog() },
+                        modifier = Modifier.testTag("btn_dismiss_key_decrypt_dialog")
+                    ) {
+                        Text("Batal")
+                    }
+                }
             )
         }
 
@@ -738,11 +815,13 @@ private fun RekapinBottomNavigation(
 
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp
+        tonalElevation = 0.dp,
+        windowInsets = WindowInsets.navigationBars
     ) {
         destinations.forEachIndexed { index, (icon, label, testTag) ->
+            val isSelected = (selectedDestination == index)
             NavigationBarItem(
-                selected = selectedDestination == index,
+                selected = isSelected,
                 onClick = { onSelect(index) },
                 icon = {
                     if (index == 1 && historyCount > 0) {
@@ -751,7 +830,7 @@ private fun RekapinBottomNavigation(
                                 Badge(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
-                                ) { Text(historyCount.toString()) }
+                                ) { Text(historyCount.toString(), style = RekapinTypography.captionBold) }
                             }
                         ) {
                             Icon(icon, contentDescription = label)
@@ -760,13 +839,26 @@ private fun RekapinBottomNavigation(
                         Icon(icon, contentDescription = label)
                     }
                 },
-                label = { Text(label) },
+                label = {
+                    Text(
+                        text = label,
+                        style = if (isSelected) RekapinTypography.captionBold else RekapinTypography.caption
+                    )
+                },
                 alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primary,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
                 modifier = Modifier.testTag(testTag)
             )
         }
     }
 }
+
 
 @Composable
 private fun IdleSetupContent(
@@ -808,2472 +900,418 @@ private fun IdleSetupContent(
     onOpenHistory: () -> Unit,
     hasApiKey: Boolean
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
-    var studioStep by remember { mutableIntStateOf(0) }
-    val studioStepTitles = listOf("Pilih video", "Rentang analisis", "Segmen & pemotongan", "Gaya & model", "Tinjau rencana")
 
-    LaunchedEffect(selectedVideo?.uri) {
-        if (selectedVideo == null) {
-            studioStep = 0
-        } else if (studioStep == 0) {
-            studioStep = 1
+    Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(scrollState)
+                .padding(horizontal = RekapinSpacing.lg, vertical = RekapinSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(RekapinSpacing.md)
+        ) {
+            // Banner Lanjutkan Analisis Tertunda (jika ada yang belum selesai)
+            if (pendingAnalysis != null) {
+                PendingResumeBanner(
+                    pendingAnalysis = pendingAnalysis,
+                    onResumeAnalysis = onResumeAnalysis,
+                    onFinishWithoutCurrentSegment = onFinishWithoutCurrentSegment
+                )
+            }
+
+            // Banner Warning jika API key belum diatur
+            if (!hasApiKey) {
+                ApiKeyWarningBanner(onOpenSettings = onOpenSettings)
+            }
+
+            // 1. Kartu "Video"
+            VideoSetupCard(
+                selectedVideo = selectedVideo,
+                analysisRangeStartSec = analysisRangeStartSec,
+                analysisRangeEndSec = analysisRangeEndSec,
+                onSelectVideoClicked = onSelectVideoClicked,
+                onClearVideo = onClearVideo,
+                onRangeChanged = onRangeChanged
+            )
+
+            // 2. Kartu "Pengaturan Utama"
+            MainSettingsCard(
+                visualStyles = visualStyles,
+                selectedStyle = selectedStyle,
+                onSelectStyle = onSelectStyle,
+                promptCutMode = promptCutMode,
+                onPromptCutModeChanged = onPromptCutModeChanged,
+                promptInterval = promptInterval,
+                onIntervalChanged = onIntervalChanged,
+                maxSceneDurationSeconds = maxSceneDurationSeconds,
+                onMaxSceneDurationChanged = onMaxSceneDurationChanged
+            )
+
+            // 3. Kartu "Lanjutan" (tertutup secara default)
+            AdvancedSettingsCard(
+                segmentDurationOption = segmentDurationOption,
+                onSegmentDurationChanged = onSegmentDurationChanged,
+                historyList = historyList,
+                selectedSeriesSourceId = selectedSeriesSourceId,
+                selectedSeriesSourceName = selectedSeriesSourceName,
+                selectedSeriesSourceBible = selectedSeriesSourceBible,
+                onSelectSeriesSource = onSelectSeriesSource,
+                models = models,
+                selectedModel = selectedModel,
+                selectedModelUsage = selectedModelUsage,
+                onSelectModel = onSelectModel,
+                onOpenManualQuota = onOpenManualQuota
+            )
+
+            // 4. Kartu "Ringkasan Rencana"
+            PlanSummaryCard(
+                selectedVideo = selectedVideo,
+                segmentPlanSummary = segmentPlanSummary,
+                promptCutMode = promptCutMode,
+                detectedSceneCount = detectedSceneCount,
+                selectedModelUsage = selectedModelUsage
+            )
         }
-    }
-    LaunchedEffect(studioStep) {
-        scrollState.scrollTo(0)
-    }
-    BackHandler(enabled = studioStep > 0) {
-        studioStep = (studioStep - 1).coerceAtLeast(0)
-    }
 
-    Column(
+        // 5. PrimaryActionBar menempel di bawah dengan tombol "Mulai Analisis"
+        val canStart = (selectedVideo != null)
+        val summaryText = if (!canStart) {
+            "Pilih video dulu"
+        } else {
+            val segCount = segmentPlanSummary?.segmentCount ?: 1
+            val modelName = selectedModel.ifBlank { "Gemini" }
+            "Siap dianalisis · $segCount segmen ($modelName)"
+        }
+
+        PrimaryActionBar(
+            buttonText = "Mulai Analisis",
+            enabled = canStart,
+            summaryText = summaryText,
+            icon = Icons.Default.Animation,
+            onClick = onStartAnalysis,
+            buttonModifier = Modifier.testTag("btn_start_analysis")
+        )
+    }
+}
+
+@Composable
+private fun PendingResumeBanner(
+    pendingAnalysis: AnimeAnalysisEntity,
+    onResumeAnalysis: (Long) -> Unit,
+    onFinishWithoutCurrentSegment: (Long) -> Unit
+) {
+    RekapinCard(
+        isSelected = true,
+        shape = RoundedCornerShape(RekapinRadii.md),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .fillMaxWidth()
+            .testTag("banner_resume_pending")
     ) {
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            modifier = Modifier.fillMaxWidth()
+        Column(
+            modifier = Modifier.padding(RekapinSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.primary),
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(RekapinRadii.sm))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Animation,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(30.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "REKAPIN STUDIO",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        letterSpacing = 1.2.sp
-                    )
-                    Text(
-                        text = "Cerita dimulai dari sini",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = when (studioStep) {
-                            0 -> "Pilih video anime untuk mulai."
-                            1 -> "Tentukan bagian video yang ingin dianalisis."
-                            2 -> "Atur panjang segmen dan mode pemotongan."
-                            3 -> "Pilih gaya visual dan model Gemini."
-                            else -> "Periksa kembali rencana sebelum analisis."
-                        },
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
-                    )
-                }
-            }
-        }
-
-        // Banner Lanjutkan Analisis Tertunda jika ada yang belum selesai
-        if (pendingAnalysis != null && studioStep == 0) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        RoundedCornerShape(16.dp)
-                    )
-                    .testTag("banner_resume_pending")
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Movie,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Lanjutkan Analisis Tertunda",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "${pendingAnalysis.videoName} (Tersimpan Segmen ${pendingAnalysis.completedSegmentsCount} dari ${pendingAnalysis.totalSegments})",
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Button(
-                        onClick = { onResumeAnalysis(pendingAnalysis.id) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .testTag("btn_resume_pending_home")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Lanjutkan dari Segmen ${pendingAnalysis.completedSegmentsCount + 1}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedButton(
-                        onClick = { onFinishWithoutCurrentSegment(pendingAnalysis.id) },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp)
-                            .testTag("btn_finish_without_segment_home")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Selesaikan tanpa segmen ini",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // Warning jika API key belum diatur
-        if (!hasApiKey) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenSettings() }
-                    .testTag("api_key_warning_banner")
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "API Key Gemini Belum Diatur",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Text(
-                            text = "Ketuk untuk memasukkan API Key Gemini gratis Anda agar dapat memulai analisis.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                        )
-                    }
-                }
-            }
-        }
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "LANGKAH ${studioStep + 1} DARI ${studioStepTitles.size}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 0.8.sp
-                        )
-                        Text(
-                            text = studioStepTitles[studioStep.coerceIn(studioStepTitles.indices)],
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Text(
-                        text = "${studioStep + 1}/${studioStepTitles.size}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                LinearProgressIndicator(
-                    progress = { (studioStep + 1).toFloat() / studioStepTitles.size },
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(CircleShape)
-                )
-                if (selectedVideo != null && studioStep > 0) {
-                    Text(
-                        text = selectedVideo.displayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        if (studioStep == 0) {
-        // Section 1: Video Selector
-        Text(
-            text = "1. Berkas Video Anime",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        if (selectedVideo == null) {
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelectVideoClicked() }
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.outline,
-                        shape = RoundedCornerShape(18.dp)
-                    )
-                    .testTag("pick_video_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(34.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Pilih Berkas Video Anime",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Target pemakaian: Video anime (.mp4, .mkv, .webm)",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 16.sp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = onSelectVideoClicked,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("btn_select_video")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Pilih Video dari Galeri", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        } else {
-            // Video Selected Info Card
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .testTag("video_info_card")
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Movie,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = selectedVideo.displayName,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "${selectedVideo.sizeFormatted} • Durasi: ${selectedVideo.durationFormatted}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        IconButton(
-                            onClick = onClearVideo,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("clear_video_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Hapus video",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        OutlinedButton(
-                            onClick = onSelectVideoClicked,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .height(40.dp)
-                                .testTag("btn_change_video")
-                        ) {
-                            Text("Ganti Video", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-        }
-
-        // Bagian Rentang Analisis (Hanya tampil setelah video dipilih dan durasi terbaca)
-        if (studioStep == 1 && selectedVideo != null && selectedVideo.durationMs > 0) {
-            val totalVideoSeconds = (selectedVideo.durationMs / 1000).coerceAtLeast(1L)
-            val currentRangeStart = analysisRangeStartSec.coerceIn(0L, totalVideoSeconds)
-            val currentRangeEnd = if (analysisRangeEndSec <= 0L || analysisRangeEndSec > totalVideoSeconds) totalVideoSeconds else analysisRangeEndSec
-
-            Text(
-                text = "Rentang Analisis",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("analysis_range_card")
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCut,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Potong / Batasi Video",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // Badge Rentang Aktif
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = "${SegmentCalculator.formatTimeSeconds(currentRangeEnd - currentRangeStart)} terpilih",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Analisis hanya sebagian video atau seluruhnya. Geser slider atau masukkan waktu manual (mm:ss atau h:mm:ss).",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 15.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Thumbnail frame preview saat slider digeser
-                    var activeThumbTimeSec by remember { mutableStateOf<Long?>(currentRangeStart) }
-                    var activeThumbLabel by remember { mutableStateOf("Awal") }
-                    var thumbBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-                    var isThumbLoading by remember { mutableStateOf(false) }
-
-                    LaunchedEffect(activeThumbTimeSec) {
-                        val sec = activeThumbTimeSec ?: return@LaunchedEffect
-                        delay(200) // Jeda 200 ms agar ringan di HP RAM kecil
-                        isThumbLoading = true
-                        val bmp = VideoThumbnailHelper.getFrameThumbnail(context, selectedVideo.uri, sec)
-                        thumbBitmap = bmp
-                        isThumbLoading = false
-                    }
-
-                    // Tampilan Frame Thumbnail
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            if (thumbBitmap != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .border(
-                                            width = 1.dp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                ) {
-                                    Image(
-                                        bitmap = thumbBitmap!!.asImageBitmap(),
-                                        contentDescription = "Thumbnail frame posisi $activeThumbLabel",
-                                        modifier = Modifier
-                                            .width(160.dp)
-                                            .height(90.dp),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .fillMaxWidth()
-                                            .background(Color.Black.copy(alpha = 0.75f))
-                                            .padding(vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = "$activeThumbLabel: ${SegmentCalculator.formatTimeSeconds(activeThumbTimeSec ?: 0L)}",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            modifier = Modifier.align(Alignment.Center)
-                                        )
-                                    }
-                                }
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .width(160.dp)
-                                        .height(90.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surface),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isThumbLoading) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(24.dp),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Movie,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "Geser slider untuk pratinjau",
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // RangeSlider
-                    RangeSlider(
-                        value = currentRangeStart.toFloat()..currentRangeEnd.toFloat(),
-                        onValueChange = { range ->
-                            val startMoved = kotlin.math.abs(range.start - currentRangeStart.toFloat()) > 0.5f
-                            var newStart = range.start.toLong().coerceIn(0L, totalVideoSeconds - SegmentCalculator.MIN_RANGE_SECONDS)
-                            var newEnd = range.endInclusive.toLong().coerceIn(SegmentCalculator.MIN_RANGE_SECONDS, totalVideoSeconds)
-
-                            if (newEnd - newStart < SegmentCalculator.MIN_RANGE_SECONDS) {
-                                if (startMoved) {
-                                    newStart = (newEnd - SegmentCalculator.MIN_RANGE_SECONDS).coerceAtLeast(0L)
-                                } else {
-                                    newEnd = (newStart + SegmentCalculator.MIN_RANGE_SECONDS).coerceAtMost(totalVideoSeconds)
-                                }
-                            }
-
-                            activeThumbTimeSec = if (startMoved) newStart else newEnd
-                            activeThumbLabel = if (startMoved) "Awal" else "Akhir"
-                            onRangeChanged(newStart, newEnd)
-                        },
-                        valueRange = 0f..totalVideoSeconds.toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("range_slider_analysis")
-                    )
-
-                    // Keterangan Waktu Rentang di bawah slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Awal: ${SegmentCalculator.formatTimeSeconds(currentRangeStart)}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Durasi Video: ${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Akhir: ${SegmentCalculator.formatTimeSeconds(currentRangeEnd)}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Isian Waktu Manual (Awal & Akhir) yang tersinkron dengan slider
-                    var startInputText by remember(currentRangeStart) {
-                        mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeStart))
-                    }
-                    var endInputText by remember(currentRangeEnd) {
-                        mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeEnd))
-                    }
-                    var validationErrorMsg by remember { mutableStateOf<String?>(null) }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Input Waktu Awal
-                        OutlinedTextField(
-                            value = startInputText,
-                            onValueChange = { input ->
-                                startInputText = input
-                                val parsedStart = SegmentCalculator.parseTimeSeconds(input)
-                                val parsedEnd = SegmentCalculator.parseTimeSeconds(endInputText) ?: currentRangeEnd
-                                if (parsedStart == null) {
-                                    validationErrorMsg = "Format waktu awal tidak valid (gunakan mm:ss atau h:mm:ss)"
-                                } else if (parsedStart < 0L) {
-                                    validationErrorMsg = "Waktu awal tidak boleh kurang dari 0"
-                                } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
-                                    validationErrorMsg = "Selisih waktu akhir dan awal minimal 10 detik"
-                                } else if (parsedEnd > totalVideoSeconds) {
-                                    validationErrorMsg = "Waktu akhir melebihi durasi video (${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)})"
-                                } else {
-                                    validationErrorMsg = null
-                                    activeThumbTimeSec = parsedStart
-                                    activeThumbLabel = "Awal"
-                                    onRangeChanged(parsedStart, parsedEnd)
-                                }
-                            },
-                            label = { Text("Waktu Awal", fontSize = 12.sp) },
-                            placeholder = { Text("00:00", fontSize = 12.sp) },
-                            singleLine = true,
-                            isError = validationErrorMsg != null,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("input_range_start")
-                        )
-
-                        // Input Waktu Akhir
-                        OutlinedTextField(
-                            value = endInputText,
-                            onValueChange = { input ->
-                                endInputText = input
-                                val parsedEnd = SegmentCalculator.parseTimeSeconds(input)
-                                val parsedStart = SegmentCalculator.parseTimeSeconds(startInputText) ?: currentRangeStart
-                                if (parsedEnd == null) {
-                                    validationErrorMsg = "Format waktu akhir tidak valid (gunakan mm:ss atau h:mm:ss)"
-                                } else if (parsedEnd > totalVideoSeconds) {
-                                    validationErrorMsg = "Waktu akhir melebihi durasi video (${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)})"
-                                } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
-                                    validationErrorMsg = "Selisih waktu akhir dan awal minimal 10 detik"
-                                } else {
-                                    validationErrorMsg = null
-                                    activeThumbTimeSec = parsedEnd
-                                    activeThumbLabel = "Akhir"
-                                    onRangeChanged(parsedStart, parsedEnd)
-                                }
-                            },
-                            label = { Text("Waktu Akhir", fontSize = 12.sp) },
-                            placeholder = { Text(SegmentCalculator.formatTimeSeconds(totalVideoSeconds), fontSize = 12.sp) },
-                            singleLine = true,
-                            isError = validationErrorMsg != null,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("input_range_end")
-                        )
-                    }
-
-                    // Pesan Validasi Error (jika ada)
-                    if (validationErrorMsg != null) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = validationErrorMsg ?: "",
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Tombol Reset ke Seluruh Video
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                validationErrorMsg = null
-                                startInputText = SegmentCalculator.formatTimeSeconds(0L)
-                                endInputText = SegmentCalculator.formatTimeSeconds(totalVideoSeconds)
-                                activeThumbTimeSec = 0L
-                                activeThumbLabel = "Awal"
-                                onRangeChanged(0L, totalVideoSeconds)
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .height(36.dp)
-                                .testTag("btn_reset_full_video")
-                        ) {
-                            Text("Pilih Seluruh Video", fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-        } else if (studioStep == 1 && selectedVideo != null) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-            ) {
-                Text(
-                    text = "Durasi video belum terbaca. Kembali ke langkah video lalu pilih berkas lain.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-        }
-
-        if (studioStep == 2) {
-        // Section 2: Pilihan Panjang Segmen
-        Text(
-            text = "2. Pilihan Panjang Segmen",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                // Option Otomatis (Default)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSegmentDurationChanged(SegmentDurationOption.AUTO) }
-                        .background(
-                            if (segmentDurationOption == SegmentDurationOption.AUTO) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("segment_auto_option"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = (segmentDurationOption == SegmentDurationOption.AUTO),
-                        onClick = { onSegmentDurationChanged(SegmentDurationOption.AUTO) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Otomatis",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Default",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Durasi ≤4,5m = 1 segmen; ≤12m = 3 menit; >12m = 5 menit",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Option 3 Menit
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSegmentDurationChanged(SegmentDurationOption.THREE_MIN) }
-                        .background(
-                            if (segmentDurationOption == SegmentDurationOption.THREE_MIN) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("segment_3m_option"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = (segmentDurationOption == SegmentDurationOption.THREE_MIN),
-                        onClick = { onSegmentDurationChanged(SegmentDurationOption.THREE_MIN) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "3 Menit",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Segmen 3 menit per pemanggilan Gemini (standar terinci)",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Option 5 Menit
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSegmentDurationChanged(SegmentDurationOption.FIVE_MIN) }
-                        .background(
-                            if (segmentDurationOption == SegmentDurationOption.FIVE_MIN) MaterialTheme.colorScheme.surfaceContainerHighest
-                            else MaterialTheme.colorScheme.surface
-                        )
-                        .padding(12.dp)
-                        .testTag("segment_5m_option"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = (segmentDurationOption == SegmentDurationOption.FIVE_MIN),
-                        onClick = { onSegmentDurationChanged(SegmentDurationOption.FIVE_MIN) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "5 Menit",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Segmen 5 menit per pemanggilan (mengurangi jumlah request)",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 3: Pengaturan Interval Visual Prompt / Mode Potong Prompt
-        Text(
-            text = if (promptCutMode == PromptCutMode.PER_SCENE) "3. Mode Potong Prompt & Batas Durasi Adegan" else "3. Pilihan Interval Visual Prompt",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                // Pilihan Mode Potong Prompt
-                Text(
-                    text = "Mode Potong Prompt",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val isFixed = (promptCutMode == PromptCutMode.FIXED_INTERVAL)
-                    // Chip Interval Tetap
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isFixed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isFixed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onPromptCutModeChanged(PromptCutMode.FIXED_INTERVAL) }
-                            .testTag("chip_cut_mode_fixed")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = isFixed,
-                                onClick = { onPromptCutModeChanged(PromptCutMode.FIXED_INTERVAL) },
-                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Column {
-                                Text(
-                                    text = "Interval Tetap",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = if (isFixed) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Bawaan",
-                                    fontSize = 10.sp,
-                                    color = if (isFixed) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    val isScene = (promptCutMode == PromptCutMode.PER_SCENE)
-                    // Chip Per Adegan
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isScene) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isScene) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onPromptCutModeChanged(PromptCutMode.PER_SCENE) }
-                            .testTag("chip_cut_mode_scene")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = isScene,
-                                onClick = { onPromptCutModeChanged(PromptCutMode.PER_SCENE) },
-                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Column {
-                                Text(
-                                    text = "Per Adegan",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = if (isScene) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Deteksi lokal",
-                                    fontSize = 10.sp,
-                                    color = if (isScene) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (promptCutMode == PromptCutMode.PER_SCENE) {
-                    // Helper text
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Adegan dideteksi otomatis dari pergantian gambar, tanpa AI dan tanpa kuota.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = "Batas maksimum durasi satu adegan:",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 1. Option 3 Detik
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMaxSceneDurationChanged(3) }
-                            .background(
-                                if (maxSceneDurationSeconds == 3) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("interval_3s_option"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (maxSceneDurationSeconds == 3),
-                            onClick = { onMaxSceneDurationChanged(3) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "3 Detik",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Adegan yang lebih panjang dari 3 detik dipecah per 3 detik",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 2. Option 5 Detik (Bawaan)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMaxSceneDurationChanged(5) }
-                            .background(
-                                if (maxSceneDurationSeconds == 5) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("interval_5s_option"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (maxSceneDurationSeconds == 5),
-                            onClick = { onMaxSceneDurationChanged(5) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "5 Detik",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Bawaan",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Adegan yang lebih panjang dari 5 detik dipecah per 5 detik",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 3. Option 10 Detik
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMaxSceneDurationChanged(10) }
-                            .background(
-                                if (maxSceneDurationSeconds == 10) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("radio_max_scene_10"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (maxSceneDurationSeconds == 10),
-                            onClick = { onMaxSceneDurationChanged(10) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "10 Detik",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Adegan yang lebih panjang dari 10 detik dipecah per 10 detik",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 4. Option Tanpa Batas (0)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMaxSceneDurationChanged(0) }
-                            .background(
-                                if (maxSceneDurationSeconds == 0) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("radio_max_scene_unlimited"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (maxSceneDurationSeconds == 0),
-                            onClick = { onMaxSceneDurationChanged(0) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "Tanpa batas",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Satu adegan = satu prompt, tidak dipecah lagi",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else {
-                    // Option 10 Detik
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onIntervalChanged(10) }
-                            .background(
-                                if (promptInterval == 10) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("interval_10s_option"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (promptInterval == 10),
-                            onClick = { onIntervalChanged(10) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "10 Detik",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Stabil & Cepat",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Paling hemat kuota dan stabil untuk mencegah server Google sibuk (503)",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Option 5 Detik (Default)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onIntervalChanged(5) }
-                            .background(
-                                if (promptInterval == 5) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("interval_5s_option"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (promptInterval == 5),
-                            onClick = { onIntervalChanged(5) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "5 Detik",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Default",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Rekomendasi optimal untuk video anime (hemat kuota & cepat)",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Option 3 Detik
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onIntervalChanged(3) }
-                            .background(
-                                if (promptInterval == 3) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surface
-                            )
-                            .padding(12.dp)
-                            .testTag("interval_3s_option"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = (promptInterval == 3),
-                            onClick = { onIntervalChanged(3) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "3 Detik",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Detail adegan visual lebih rapat untuk aksi cepat dan animasi dinamis",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        }
-        if (studioStep == 3) {
-        // Pilihan Gaya Visual Prompt
-        Text(
-            text = "Gaya Visual",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        var isStyleDropdownExpanded by remember { mutableStateOf(false) }
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { isStyleDropdownExpanded = true }
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(12.dp)
-                            .testTag("dropdown_style_selector"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Palette,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = selectedStyle.name,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(
-                                                if (selectedStyle.isBuiltIn) MaterialTheme.colorScheme.primaryContainer
-                                                else MaterialTheme.colorScheme.secondaryContainer
-                                            )
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                    ) {
-                                        Text(
-                                            text = if (selectedStyle.isBuiltIn) "Bawaan" else "Kustom",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (selectedStyle.isBuiltIn) MaterialTheme.colorScheme.onPrimaryContainer
-                                            else MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = selectedStyle.promptDescription,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Pilih Gaya Visual",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = isStyleDropdownExpanded,
-                        onDismissRequest = { isStyleDropdownExpanded = false },
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .background(MaterialTheme.colorScheme.surface)
-                            .testTag("dropdown_style_menu")
-                    ) {
-                        visualStyles.forEachIndexed { index, style ->
-                            val isSelected = style.id == selectedStyle.id
-                            DropdownMenuItem(
-                                text = {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Text(
-                                                text = style.name,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                fontSize = 13.sp,
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(
-                                                        if (style.isBuiltIn) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                                        else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                                                    )
-                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                                            ) {
-                                                Text(
-                                                    text = if (style.isBuiltIn) "Bawaan" else "Kustom",
-                                                    fontSize = 9.sp,
-                                                    color = if (style.isBuiltIn) MaterialTheme.colorScheme.onPrimaryContainer
-                                                    else MaterialTheme.colorScheme.onSecondaryContainer
-                                                )
-                                            }
-                                            if (isSelected) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = "Terpilih",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = style.promptDescription,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    onSelectStyle(style)
-                                    isStyleDropdownExpanded = false
-                                },
-                                modifier = Modifier.testTag("menu_item_style_$index")
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pilihan Seri (Opsional)
-        Text(
-            text = "Seri (Opsional)",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        var isSeriesDropdownExpanded by remember { mutableStateOf(false) }
-        val completedSeriesList = remember(historyList) {
-            historyList.filter { it.isCompleted }
-        }
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { isSeriesDropdownExpanded = true }
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(12.dp)
-                            .testTag("dropdown_series_selector"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = if (selectedSeriesSourceId != null) selectedSeriesSourceName
-                                    else "Tanpa seri (video mandiri)",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (selectedSeriesSourceId != null) "Character sheet dilanjutkan dari video ini"
-                                    else "Character sheet dimulai dari nol",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (selectedSeriesSourceId != null) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    val bibleInfoText = if (selectedSeriesSourceBible != null && !selectedSeriesSourceBible.isEmpty()) {
-                                        "Memori seri: ${selectedSeriesSourceBible.locations.size} lokasi, ${selectedSeriesSourceBible.glossary.size} istilah"
-                                    } else {
-                                        "Belum ada memori seri (akan dibuat setelah analisis ini selesai)"
-                                    }
-                                    Text(
-                                        text = bibleInfoText,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Pilih Seri",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = isSeriesDropdownExpanded,
-                        onDismissRequest = { isSeriesDropdownExpanded = false },
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .background(MaterialTheme.colorScheme.surface)
-                            .testTag("dropdown_series_menu")
-                    ) {
-                        // Pilihan a: Tanpa seri
-                        val isNoneSelected = (selectedSeriesSourceId == null)
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Tanpa seri (video mandiri)",
-                                            fontWeight = if (isNoneSelected) FontWeight.Bold else FontWeight.Normal,
-                                            fontSize = 13.sp,
-                                            color = if (isNoneSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "Character sheet dimulai dari nol",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    if (isNoneSelected) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Terpilih",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = {
-                                onSelectSeriesSource(null)
-                                isSeriesDropdownExpanded = false
-                            },
-                            modifier = Modifier.testTag("menu_item_series_none")
-                        )
-
-                        // Pilihan b: Daftar analisis selesai
-                        if (completedSeriesList.isNotEmpty()) {
-                            completedSeriesList.forEach { entity ->
-                                val isSelected = (selectedSeriesSourceId == entity.id)
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = entity.videoName,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    fontSize = 13.sp,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = "${entity.totalSegments} Segmen • ${entity.formattedDate}",
-                                                    fontSize = 10.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            if (isSelected) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = "Terpilih",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        onSelectSeriesSource(entity.id)
-                                        isSeriesDropdownExpanded = false
-                                    },
-                                    modifier = Modifier.testTag("menu_item_series_${entity.id}")
-                                )
-                            }
-                        } else {
-                            // Pilihan c: Jika belum ada analisis selesai
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Belum ada analisis selesai di riwayat",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                },
-                                enabled = false,
-                                onClick = {}
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        }
-
-        if (studioStep == 4) {
-        // Section 4: Ringkasan Rencana Analisis
-        Text(
-            text = "4. Ringkasan Rencana Analisis",
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (selectedVideo != null) MaterialTheme.colorScheme.surfaceContainerLow
-                else MaterialTheme.colorScheme.surface
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(
-                    width = 1.dp,
-                    color = if (selectedVideo != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                    else MaterialTheme.colorScheme.outline,
-                    shape = RoundedCornerShape(16.dp)
-                )
-                .testTag("segment_plan_summary_card")
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                if (selectedVideo != null && segmentPlanSummary != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Animation,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Rencana Segmen & Permintaan AI",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    ReviewSummaryItem(label = "Video", value = selectedVideo.displayName)
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 1. Durasi video
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Durasi Video",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = segmentPlanSummary.totalDurationFormatted,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Rentang Analisis
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Rentang Analisis",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = segmentPlanSummary.rangeFormatted,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 2. Panjang segmen terpilih
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Panjang Segmen Terpilih",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = segmentPlanSummary.segmentDurationLabel,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 3. Jumlah segmen
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Jumlah Segmen",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${segmentPlanSummary.segmentCount} Segmen",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 4. Perkiraan jumlah adegan / Jumlah adegan terdeteksi
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (promptCutMode == PromptCutMode.PER_SCENE) {
-                            Text(
-                                text = "Jumlah adegan terdeteksi",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            val countLabel = if (detectedSceneCount != null) {
-                                "$detectedSceneCount adegan"
-                            } else {
-                                "Dihitung saat mulai"
-                            }
-                            Text(
-                                text = countLabel,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Text(
-                                text = "Perkiraan Jumlah Adegan",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "±${segmentPlanSummary.estimatedScenesCount} adegan visual",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    if (promptCutMode == PromptCutMode.PER_SCENE) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Batas Durasi Adegan",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            val maxDurLabel = if (maxSceneDurationSeconds == 0) "Tanpa batas" else "$maxSceneDurationSeconds detik"
-                            Text(
-                                text = maxDurLabel,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 5. Jumlah permintaan (segmen + 1 narasi)
-                    val requestBreakdown = buildList {
-                        add("${segmentPlanSummary.segmentCount} segmen")
-                        if (narrationMode == com.example.data.model.NarrationMode.REKAP_VOICEOVER) add("1 narasi final")
-                        if (isAutoBuildSeriesBible) add("1 Memori Seri")
-                    }.joinToString(" + ")
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Perkiraan Panggilan AI",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "≈ ${segmentPlanSummary.totalRequestsCount} ($requestBreakdown)",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Text(
-                        text = "Perkiraan ini tidak mencakup upload/polling video, retry, atau Gabung & Ekspor; kuota resmi ditentukan Google.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 6. Kebutuhan vs Sisa Kuota
-                    val needed = segmentPlanSummary.totalRequestsCount
-                    val remaining = selectedModelUsage.remaining
-                    val isInsufficient = remaining < needed
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Pemeriksaan Kuota (perkiraan)",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Perlu sekitar $needed; hitungan lokal tersisa $remaining",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = if (isInsufficient) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // 7. Gaya Visual Terpilih
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Gaya Visual Prompt",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Palette,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = selectedStyle.name,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    ReviewSummaryItem(
-                        label = "Mode pemotongan",
-                        value = if (promptCutMode == PromptCutMode.PER_SCENE) {
-                            "Per adegan • ${if (maxSceneDurationSeconds == 0) "tanpa batas" else "$maxSceneDurationSeconds dtk"}"
-                        } else {
-                            "Interval tetap • ${promptInterval} dtk"
-                        }
-                    )
-                    ReviewSummaryItem(
-                        label = "Model Gemini",
-                        value = selectedModel.ifBlank { "Belum dipilih" }
-                    )
-
-                    if (selectedSeriesSourceId != null) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Lanjutan Seri",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(start = 12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.History,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Melanjutkan seri dari: $selectedSeriesSourceName",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    if (isInsufficient) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Card(
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("warning_quota_insufficient")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = "Peringatan Kuota",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Peringatan: Sisa kuota model ${selectedModelUsage.modelName} ($remaining) kurang dari yang diperlukan ($needed permintaan). Pertimbangkan beralih model atau menunggu reset kuota.",
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    Text(
-                        text = "Silakan pilih video anime terlebih dahulu untuk melihat ringkasan durasi, pembagian segmen, dan perkiraan jumlah permintaan AI.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 16.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Rentang Analisis",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Seluruh video (default)",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Gaya Visual Aktif",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Palette,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = selectedStyle.name,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    listOf(
-                        "Video" to 0,
-                        "Rentang" to 1,
-                        "Segmen" to 2,
-                        "Gaya/model" to 3
-                    ).forEachIndexed { index, (label, targetStep) ->
-                        TextButton(
-                            onClick = { studioStep = targetStep },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.testTag("edit_summary_section_$index")
-                        ) {
-                            Text(label, fontSize = 11.sp, maxLines = 1)
-                        }
-                    }
-                }
-            }
-        }
-
-        }
-
-        if (studioStep == 3) {
-        // Pemilihan Model Gemini
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
+                        imageVector = Icons.Default.Movie,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(22.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Model Gemini",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = "Lanjutkan Analisis Tertunda",
+                        style = RekapinTypography.bodyBold,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Model ini dipakai untuk seluruh proses analisis video dan narasi.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Card Status Penggunaan Hari Ini & Jam Reset
-                Card(
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (selectedModelUsage.isQuotaExceeded) {
-                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
-                        }
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("card_quota_today_status")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Hari ini: ${selectedModelUsage.modelName} ${selectedModelUsage.used}/${selectedModelUsage.limit}",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = if (selectedModelUsage.isQuotaExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Perkiraan reset: ${selectedModelUsage.resetTimeFormatted} (waktu HP)",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = { onOpenManualQuota(selectedModel) },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .height(32.dp)
-                                .testTag("btn_manual_adjust_quota")
-                        ) {
-                            Text(
-                                text = "Atur manual",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                var isModelDropdownExpanded by remember { mutableStateOf(false) }
-
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { isModelDropdownExpanded = true },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("dropdown_model_button"),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = selectedModel.ifBlank { "Pilih Model" },
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = "Pilih Model",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = isModelDropdownExpanded,
-                        onDismissRequest = { isModelDropdownExpanded = false },
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surface)
-                            .testTag("dropdown_model_menu")
-                    ) {
-                        models.forEachIndexed { index, modelName ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = modelName,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 13.sp,
-                                            fontWeight = if (modelName == selectedModel) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (modelName == selectedModel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (modelName == selectedModel) {
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Terpilih",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    onSelectModel(modelName)
-                                    isModelDropdownExpanded = false
-                                },
-                                modifier = Modifier.testTag("menu_item_model_$index")
-                            )
-                        }
-                    }
+                    Text(
+                        text = "${pendingAnalysis.videoName} (Tersimpan Segmen ${pendingAnalysis.completedSegmentsCount} dari ${pendingAnalysis.totalSegments})",
+                        style = RekapinTypography.caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-        }
 
-        }
-
-        if (studioStep == 4) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Button(
+                onClick = { onResumeAnalysis(pendingAnalysis.id) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("btn_resume_pending_home")
             ) {
-                OutlinedButton(
-                    onClick = { studioStep = 3 },
-                    shape = RoundedCornerShape(14.dp),
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                Text(
+                    text = "Lanjutkan dari Segmen ${pendingAnalysis.completedSegmentsCount + 1}",
+                    style = RekapinTypography.bodyBold
+                )
+            }
+
+            OutlinedButton(
+                onClick = { onFinishWithoutCurrentSegment(pendingAnalysis.id) },
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .testTag("btn_finish_without_segment_home")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                Text(
+                    text = "Selesaikan tanpa segmen ini",
+                    style = RekapinTypography.captionBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ApiKeyWarningBanner(onOpenSettings: () -> Unit) {
+    RekapinCard(
+        isSelected = true,
+        onClick = onOpenSettings,
+        shape = RoundedCornerShape(RekapinRadii.md),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("api_key_warning_banner")
+    ) {
+        Row(
+            modifier = Modifier.padding(RekapinSpacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "API Key Gemini Belum Diatur",
+                    style = RekapinTypography.bodyBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Ketuk untuk memasukkan API Key Gemini gratis Anda agar dapat memulai analisis.",
+                    style = RekapinTypography.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoSetupCard(
+    selectedVideo: SelectedVideo?,
+    analysisRangeStartSec: Long,
+    analysisRangeEndSec: Long,
+    onSelectVideoClicked: () -> Unit,
+    onClearVideo: () -> Unit,
+    onRangeChanged: (Long, Long) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    if (selectedVideo == null) {
+        RekapinCard(
+            onClick = onSelectVideoClicked,
+            shape = RoundedCornerShape(RekapinRadii.md),
+            containerColor = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("pick_video_card")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(RekapinSpacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
                     modifier = Modifier
-                        .weight(0.8f)
-                        .height(52.dp)
-                        .testTag("btn_studio_back")
-                ) {
-                    Text("Kembali", fontSize = 12.sp)
-                }
-                Button(
-                    onClick = onStartAnalysis,
-                    enabled = selectedVideo != null,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(1.45f)
-                        .height(52.dp)
-                        .testTag("btn_start_analysis")
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(RekapinRadii.sm))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Animation,
+                        imageVector = Icons.Default.Videocam,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(RekapinSpacing.sm))
+                Text(
+                    text = "Pilih Berkas Video Anime",
+                    style = RekapinTypography.sectionTitle,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(RekapinSpacing.xs))
+                Text(
+                    text = "Target pemakaian: Video anime (.mp4, .mkv, .webm)",
+                    style = RekapinTypography.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(RekapinSpacing.md))
+                Button(
+                    onClick = onSelectVideoClicked,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(RekapinRadii.sm),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("btn_select_video")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Konfirmasi & mulai",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
+                    Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                    Text("Pilih Video dari Galeri", style = RekapinTypography.bodyBold)
                 }
             }
-        } else if (studioStep in 1..3 || (studioStep == 0 && selectedVideo != null)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+        }
+    } else {
+        RekapinCard(
+            shape = RoundedCornerShape(RekapinRadii.md),
+            containerColor = MaterialTheme.colorScheme.surface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("video_info_card")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(RekapinSpacing.md)
             ) {
-                OutlinedButton(
-                    onClick = { studioStep = (studioStep - 1).coerceAtLeast(0) },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("btn_studio_back")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Kembali", fontSize = 13.sp)
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(RekapinRadii.sm))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = selectedVideo.displayName,
+                            style = RekapinTypography.bodyBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${selectedVideo.sizeFormatted} • Durasi: ${selectedVideo.durationFormatted}",
+                            style = RekapinTypography.caption,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
+                        onClick = onClearVideo,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("clear_video_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Hapus video",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onSelectVideoClicked,
+                        shape = RoundedCornerShape(RekapinRadii.sm),
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("btn_change_video")
+                    ) {
+                        Text("Ganti", style = RekapinTypography.captionBold)
+                    }
                 }
-                Button(
-                    onClick = { studioStep = (studioStep + 1).coerceAtMost(4) },
-                    enabled = studioStep != 1 || (selectedVideo != null && selectedVideo.durationMs > 0),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("btn_studio_next")
-                ) {
-                    Text("Lanjut", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+                if (selectedVideo.durationMs > 0) {
+                    val totalVideoSeconds = (selectedVideo.durationMs / 1000).coerceAtLeast(1L)
+                    val currentRangeStart = analysisRangeStartSec.coerceIn(0L, totalVideoSeconds)
+                    val currentRangeEnd = if (analysisRangeEndSec <= 0L || analysisRangeEndSec > totalVideoSeconds) totalVideoSeconds else analysisRangeEndSec
+
+                    var isRangeExpanded by remember { mutableStateOf(false) }
+
+                    Spacer(modifier = Modifier.height(RekapinSpacing.sm))
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(RekapinRadii.sm),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("analysis_range_card")
+                    ) {
+                        Column(modifier = Modifier.padding(RekapinSpacing.sm)) {
+                            CollapsibleSection(
+                                title = "Rentang Analisis",
+                                summary = "${SegmentCalculator.formatTimeSeconds(currentRangeStart)} - ${SegmentCalculator.formatTimeSeconds(currentRangeEnd)} (${SegmentCalculator.formatTimeSeconds(currentRangeEnd - currentRangeStart)} terpilih)",
+                                isExpanded = isRangeExpanded,
+                                onToggle = { isRangeExpanded = !isRangeExpanded }
+                            ) {
+                                AnalysisRangeEditor(
+                                    context = context,
+                                    videoUri = selectedVideo.uri,
+                                    totalVideoSeconds = totalVideoSeconds,
+                                    currentRangeStart = currentRangeStart,
+                                    currentRangeEnd = currentRangeEnd,
+                                    onRangeChanged = onRangeChanged
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3281,7 +1319,940 @@ private fun IdleSetupContent(
 }
 
 @Composable
-private fun ReviewSummaryItem(label: String, value: String) {
+private fun AnalysisRangeEditor(
+    context: android.content.Context,
+    videoUri: android.net.Uri,
+    totalVideoSeconds: Long,
+    currentRangeStart: Long,
+    currentRangeEnd: Long,
+    onRangeChanged: (Long, Long) -> Unit
+) {
+    var activeThumbTimeSec by remember { mutableStateOf<Long?>(currentRangeStart) }
+    var activeThumbLabel by remember { mutableStateOf("Awal") }
+    var thumbBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var isThumbLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeThumbTimeSec) {
+        val sec = activeThumbTimeSec ?: return@LaunchedEffect
+        delay(200)
+        isThumbLoading = true
+        val bmp = VideoThumbnailHelper.getFrameThumbnail(context, videoUri, sec)
+        thumbBitmap = bmp
+        isThumbLoading = false
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
+    ) {
+        Text(
+            text = "Batasi analisis hanya pada bagian video tertentu. Geser slider atau masukkan waktu manual (mm:ss).",
+            style = RekapinTypography.caption,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // Thumbnail Frame Pratinjau
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(RekapinRadii.sm))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .padding(RekapinSpacing.xs),
+            contentAlignment = Alignment.Center
+        ) {
+            if (thumbBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(RekapinRadii.sm))
+                        .border(
+                            width = RekapinBorders.selectedWidth,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(RekapinRadii.sm)
+                        )
+                ) {
+                    Image(
+                        bitmap = thumbBitmap!!.asImageBitmap(),
+                        contentDescription = "Thumbnail frame $activeThumbLabel",
+                        modifier = Modifier
+                            .width(140.dp)
+                            .height(80.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "$activeThumbLabel: ${SegmentCalculator.formatTimeSeconds(activeThumbTimeSec ?: 0L)}",
+                            style = RekapinTypography.captionBold,
+                            color = Color.White,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .width(140.dp)
+                        .height(80.dp)
+                        .clip(RoundedCornerShape(RekapinRadii.sm))
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isThumbLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Movie,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Geser untuk pratinjau",
+                                style = RekapinTypography.caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // RangeSlider
+        RangeSlider(
+            value = currentRangeStart.toFloat()..currentRangeEnd.toFloat(),
+            onValueChange = { range ->
+                val startMoved = kotlin.math.abs(range.start - currentRangeStart.toFloat()) > 0.5f
+                var newStart = range.start.toLong().coerceIn(0L, totalVideoSeconds - SegmentCalculator.MIN_RANGE_SECONDS)
+                var newEnd = range.endInclusive.toLong().coerceIn(SegmentCalculator.MIN_RANGE_SECONDS, totalVideoSeconds)
+
+                if (newEnd - newStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                    if (startMoved) {
+                        newStart = (newEnd - SegmentCalculator.MIN_RANGE_SECONDS).coerceAtLeast(0L)
+                    } else {
+                        newEnd = (newStart + SegmentCalculator.MIN_RANGE_SECONDS).coerceAtMost(totalVideoSeconds)
+                    }
+                }
+
+                activeThumbTimeSec = if (startMoved) newStart else newEnd
+                activeThumbLabel = if (startMoved) "Awal" else "Akhir"
+                onRangeChanged(newStart, newEnd)
+            },
+            valueRange = 0f..totalVideoSeconds.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("range_slider_analysis")
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Awal: ${SegmentCalculator.formatTimeSeconds(currentRangeStart)}",
+                style = RekapinTypography.captionBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Total: ${SegmentCalculator.formatTimeSeconds(totalVideoSeconds)}",
+                style = RekapinTypography.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Akhir: ${SegmentCalculator.formatTimeSeconds(currentRangeEnd)}",
+                style = RekapinTypography.captionBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        var startInputText by remember(currentRangeStart) {
+            mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeStart))
+        }
+        var endInputText by remember(currentRangeEnd) {
+            mutableStateOf(SegmentCalculator.formatTimeSeconds(currentRangeEnd))
+        }
+        var validationErrorMsg by remember { mutableStateOf<String?>(null) }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
+        ) {
+            OutlinedTextField(
+                value = startInputText,
+                onValueChange = { input ->
+                    startInputText = input
+                    val parsedStart = SegmentCalculator.parseTimeSeconds(input)
+                    val parsedEnd = SegmentCalculator.parseTimeSeconds(endInputText) ?: currentRangeEnd
+                    if (parsedStart == null) {
+                        validationErrorMsg = "Format waktu awal tidak valid (mm:ss)"
+                    } else if (parsedStart < 0L) {
+                        validationErrorMsg = "Waktu awal minimal 00:00"
+                    } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                        validationErrorMsg = "Selisih waktu minimal 10 detik"
+                    } else if (parsedEnd > totalVideoSeconds) {
+                        validationErrorMsg = "Waktu akhir melebihi durasi video"
+                    } else {
+                        validationErrorMsg = null
+                        activeThumbTimeSec = parsedStart
+                        activeThumbLabel = "Awal"
+                        onRangeChanged(parsedStart, parsedEnd)
+                    }
+                },
+                label = { Text("Waktu Awal", style = RekapinTypography.caption) },
+                singleLine = true,
+                isError = validationErrorMsg != null,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("input_range_start")
+            )
+
+            OutlinedTextField(
+                value = endInputText,
+                onValueChange = { input ->
+                    endInputText = input
+                    val parsedEnd = SegmentCalculator.parseTimeSeconds(input)
+                    val parsedStart = SegmentCalculator.parseTimeSeconds(startInputText) ?: currentRangeStart
+                    if (parsedEnd == null) {
+                        validationErrorMsg = "Format waktu akhir tidak valid (mm:ss)"
+                    } else if (parsedEnd > totalVideoSeconds) {
+                        validationErrorMsg = "Waktu akhir melebihi durasi video"
+                    } else if (parsedEnd - parsedStart < SegmentCalculator.MIN_RANGE_SECONDS) {
+                        validationErrorMsg = "Selisih waktu minimal 10 detik"
+                    } else {
+                        validationErrorMsg = null
+                        activeThumbTimeSec = parsedEnd
+                        activeThumbLabel = "Akhir"
+                        onRangeChanged(parsedStart, parsedEnd)
+                    }
+                },
+                label = { Text("Waktu Akhir", style = RekapinTypography.caption) },
+                singleLine = true,
+                isError = validationErrorMsg != null,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("input_range_end")
+            )
+        }
+
+        if (validationErrorMsg != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                Text(
+                    text = validationErrorMsg ?: "",
+                    color = MaterialTheme.colorScheme.error,
+                    style = RekapinTypography.caption
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            OutlinedButton(
+                onClick = {
+                    validationErrorMsg = null
+                    startInputText = SegmentCalculator.formatTimeSeconds(0L)
+                    endInputText = SegmentCalculator.formatTimeSeconds(totalVideoSeconds)
+                    activeThumbTimeSec = 0L
+                    activeThumbLabel = "Awal"
+                    onRangeChanged(0L, totalVideoSeconds)
+                },
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .height(36.dp)
+                    .testTag("btn_reset_full_video")
+            ) {
+                Text("Pilih Seluruh Video", style = RekapinTypography.captionBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainSettingsCard(
+    visualStyles: List<VisualStyle>,
+    selectedStyle: VisualStyle,
+    onSelectStyle: (VisualStyle) -> Unit,
+    promptCutMode: PromptCutMode,
+    onPromptCutModeChanged: (PromptCutMode) -> Unit,
+    promptInterval: Int,
+    onIntervalChanged: (Int) -> Unit,
+    maxSceneDurationSeconds: Int,
+    onMaxSceneDurationChanged: (Int) -> Unit
+) {
+    RekapinCard(
+        shape = RoundedCornerShape(RekapinRadii.md),
+        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(RekapinSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(RekapinSpacing.md)
+        ) {
+            SectionHeader(
+                title = "Pengaturan Utama",
+                subtitle = "Gaya visual dan mode pemotongan prompt"
+            )
+
+            // 1. Gaya Visual
+            Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                Text(
+                    text = "Gaya Visual",
+                    style = RekapinTypography.bodyBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                ChoiceChips(
+                    items = visualStyles,
+                    selectedItem = selectedStyle,
+                    onItemSelected = onSelectStyle,
+                    labelProvider = { it.name },
+                    subtitleProvider = { if (it.isBuiltIn) "Bawaan" else "Kustom" },
+                    testTagProvider = { style ->
+                        val idx = visualStyles.indexOf(style)
+                        "menu_item_style_$idx"
+                    },
+                    modifier = Modifier.testTag("dropdown_style_selector")
+                )
+                Text(
+                    text = selectedStyle.promptDescription,
+                    style = RekapinTypography.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // 2. Mode Potong Prompt
+            Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                Text(
+                    text = "Mode Potong Prompt",
+                    style = RekapinTypography.bodyBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                ChoiceChips(
+                    items = listOf(PromptCutMode.FIXED_INTERVAL, PromptCutMode.PER_SCENE),
+                    selectedItem = promptCutMode,
+                    onItemSelected = onPromptCutModeChanged,
+                    labelProvider = { mode ->
+                        when (mode) {
+                            PromptCutMode.FIXED_INTERVAL -> "Interval Tetap"
+                            PromptCutMode.PER_SCENE -> "Per Adegan"
+                        }
+                    },
+                    subtitleProvider = { mode ->
+                        when (mode) {
+                            PromptCutMode.FIXED_INTERVAL -> "Bawaan"
+                            PromptCutMode.PER_SCENE -> "Deteksi lokal"
+                        }
+                    },
+                    testTagProvider = { mode ->
+                        when (mode) {
+                            PromptCutMode.FIXED_INTERVAL -> "chip_cut_mode_fixed"
+                            PromptCutMode.PER_SCENE -> "chip_cut_mode_scene"
+                        }
+                    }
+                )
+
+                // Baris chip kedua di bawahnya untuk interval atau batas durasi
+                if (promptCutMode == PromptCutMode.FIXED_INTERVAL) {
+                    Text(
+                        text = "Pilihan interval waktu:",
+                        style = RekapinTypography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ChoiceChips(
+                        items = listOf(10, 5, 3),
+                        selectedItem = promptInterval,
+                        onItemSelected = onIntervalChanged,
+                        labelProvider = { "$it Detik" },
+                        subtitleProvider = { interval ->
+                            when (interval) {
+                                10 -> "Stabil"
+                                5 -> "Default"
+                                3 -> "Rinci"
+                                else -> ""
+                            }
+                        },
+                        testTagProvider = { interval ->
+                            when (interval) {
+                                10 -> "interval_10s_option"
+                                5 -> "interval_5s_option"
+                                3 -> "interval_3s_option"
+                                else -> "interval_${interval}s_option"
+                            }
+                        }
+                    )
+                } else {
+                    Text(
+                        text = "Batas maksimum durasi adegan:",
+                        style = RekapinTypography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ChoiceChips(
+                        items = listOf(3, 5, 10, 0),
+                        selectedItem = maxSceneDurationSeconds,
+                        onItemSelected = onMaxSceneDurationChanged,
+                        labelProvider = { dur ->
+                            if (dur == 0) "Tanpa batas" else "$dur Detik"
+                        },
+                        subtitleProvider = { dur ->
+                            when (dur) {
+                                3 -> "Aksi cepat"
+                                5 -> "Bawaan"
+                                10 -> "Panjang"
+                                0 -> "Asli"
+                                else -> ""
+                            }
+                        },
+                        testTagProvider = { dur ->
+                            when (dur) {
+                                3 -> "interval_3s_option"
+                                5 -> "interval_5s_option"
+                                10 -> "radio_max_scene_10"
+                                0 -> "radio_max_scene_unlimited"
+                                else -> "radio_max_scene_$dur"
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedSettingsCard(
+    segmentDurationOption: SegmentDurationOption,
+    onSegmentDurationChanged: (SegmentDurationOption) -> Unit,
+    historyList: List<AnimeAnalysisEntity>,
+    selectedSeriesSourceId: Long?,
+    selectedSeriesSourceName: String,
+    selectedSeriesSourceBible: com.example.data.model.SeriesBible?,
+    onSelectSeriesSource: (Long?) -> Unit,
+    models: List<String>,
+    selectedModel: String,
+    selectedModelUsage: ModelUsageInfo,
+    onSelectModel: (String) -> Unit,
+    onOpenManualQuota: (String) -> Unit
+) {
+    val segSummaryText = when (segmentDurationOption) {
+        SegmentDurationOption.AUTO -> "Segmen otomatis"
+        SegmentDurationOption.THREE_MIN -> "Segmen 3m"
+        SegmentDurationOption.FIVE_MIN -> "Segmen 5m"
+    }
+    val seriesSummaryText = if (selectedSeriesSourceId != null) selectedSeriesSourceName else "Tanpa seri"
+    val modelSummaryText = selectedModel.ifBlank { "Model bawaan" }
+    val advancedSummary = "$segSummaryText · $seriesSummaryText · $modelSummaryText"
+
+    var isAdvancedExpanded by remember { mutableStateOf(false) }
+
+    RekapinCard(
+        shape = RoundedCornerShape(RekapinRadii.md),
+        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(RekapinSpacing.md)) {
+            CollapsibleSection(
+                title = "Lanjutan",
+                summary = advancedSummary,
+                isExpanded = isAdvancedExpanded,
+                onToggle = { isAdvancedExpanded = !isAdvancedExpanded }
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(RekapinSpacing.md)
+                ) {
+                    // 1. Panjang Segmen
+                    Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                        Text(
+                            text = "Panjang Segmen",
+                            style = RekapinTypography.bodyBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        ChoiceChips(
+                            items = listOf(
+                                SegmentDurationOption.AUTO,
+                                SegmentDurationOption.THREE_MIN,
+                                SegmentDurationOption.FIVE_MIN
+                            ),
+                            selectedItem = segmentDurationOption,
+                            onItemSelected = onSegmentDurationChanged,
+                            labelProvider = { opt ->
+                                when (opt) {
+                                    SegmentDurationOption.AUTO -> "Otomatis"
+                                    SegmentDurationOption.THREE_MIN -> "3 Menit"
+                                    SegmentDurationOption.FIVE_MIN -> "5 Menit"
+                                }
+                            },
+                            subtitleProvider = { opt ->
+                                when (opt) {
+                                    SegmentDurationOption.AUTO -> "Default"
+                                    SegmentDurationOption.THREE_MIN -> "Rinci"
+                                    SegmentDurationOption.FIVE_MIN -> "Hemat kuota"
+                                }
+                            },
+                            testTagProvider = { opt ->
+                                when (opt) {
+                                    SegmentDurationOption.AUTO -> "segment_auto_option"
+                                    SegmentDurationOption.THREE_MIN -> "segment_3m_option"
+                                    SegmentDurationOption.FIVE_MIN -> "segment_5m_option"
+                                }
+                            }
+                        )
+                    }
+
+                    // 2. Seri (Opsional)
+                    Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                        Text(
+                            text = "Seri (Opsional)",
+                            style = RekapinTypography.bodyBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        SeriesSelectorRow(
+                            historyList = historyList,
+                            selectedSeriesSourceId = selectedSeriesSourceId,
+                            selectedSeriesSourceName = selectedSeriesSourceName,
+                            selectedSeriesSourceBible = selectedSeriesSourceBible,
+                            onSelectSeriesSource = onSelectSeriesSource
+                        )
+                    }
+
+                    // 3. Model Gemini
+                    Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                        Text(
+                            text = "Model Gemini",
+                            style = RekapinTypography.bodyBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        ModelSelectorRow(
+                            models = models,
+                            selectedModel = selectedModel,
+                            selectedModelUsage = selectedModelUsage,
+                            onSelectModel = onSelectModel,
+                            onOpenManualQuota = onOpenManualQuota
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeriesSelectorRow(
+    historyList: List<AnimeAnalysisEntity>,
+    selectedSeriesSourceId: Long?,
+    selectedSeriesSourceName: String,
+    selectedSeriesSourceBible: com.example.data.model.SeriesBible?,
+    onSelectSeriesSource: (Long?) -> Unit
+) {
+    var isSeriesDropdownExpanded by remember { mutableStateOf(false) }
+    val completedSeriesList = remember(historyList) { historyList.filter { it.isCompleted } }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(RekapinRadii.sm),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(RekapinRadii.sm))
+                .clickable { isSeriesDropdownExpanded = true }
+                .padding(RekapinSpacing.sm)
+                .testTag("dropdown_series_selector")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (selectedSeriesSourceId != null) selectedSeriesSourceName else "Tanpa seri (video mandiri)",
+                        style = RekapinTypography.bodyBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (selectedSeriesSourceId != null) "Character sheet dilanjutkan dari video ini" else "Character sheet dimulai dari nol",
+                        style = RekapinTypography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (selectedSeriesSourceId != null) {
+                        val bibleInfoText = if (selectedSeriesSourceBible != null && !selectedSeriesSourceBible.isEmpty()) {
+                            "Memori seri: ${selectedSeriesSourceBible.locations.size} lokasi, ${selectedSeriesSourceBible.glossary.size} istilah"
+                        } else {
+                            "Belum ada memori seri (akan dibuat setelah analisis ini selesai)"
+                        }
+                        Text(
+                            text = bibleInfoText,
+                            style = RekapinTypography.captionMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Pilih Seri",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = isSeriesDropdownExpanded,
+            onDismissRequest = { isSeriesDropdownExpanded = false },
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .background(MaterialTheme.colorScheme.surface)
+                .testTag("dropdown_series_menu")
+        ) {
+            val isNoneSelected = (selectedSeriesSourceId == null)
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Tanpa seri (video mandiri)",
+                                style = if (isNoneSelected) RekapinTypography.bodyBold else RekapinTypography.body,
+                                color = if (isNoneSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Character sheet dimulai dari nol",
+                                style = RekapinTypography.caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (isNoneSelected) {
+                            Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Terpilih",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                },
+                onClick = {
+                    onSelectSeriesSource(null)
+                    isSeriesDropdownExpanded = false
+                },
+                modifier = Modifier.testTag("menu_item_series_none")
+            )
+
+            if (completedSeriesList.isNotEmpty()) {
+                completedSeriesList.forEach { entity ->
+                    val isSelected = (selectedSeriesSourceId == entity.id)
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = entity.videoName,
+                                        style = if (isSelected) RekapinTypography.bodyBold else RekapinTypography.body,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${entity.totalSegments} Segmen • ${entity.formattedDate}",
+                                        style = RekapinTypography.caption,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Terpilih",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            onSelectSeriesSource(entity.id)
+                            isSeriesDropdownExpanded = false
+                        },
+                        modifier = Modifier.testTag("menu_item_series_${entity.id}")
+                    )
+                }
+            } else {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "Belum ada analisis selesai di riwayat",
+                            style = RekapinTypography.caption,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    enabled = false,
+                    onClick = {}
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelSelectorRow(
+    models: List<String>,
+    selectedModel: String,
+    selectedModelUsage: ModelUsageInfo,
+    onSelectModel: (String) -> Unit,
+    onOpenManualQuota: (String) -> Unit
+) {
+    var isModelDropdownExpanded by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)) {
+        // Status Quota Card
+        Surface(
+            shape = RoundedCornerShape(RekapinRadii.sm),
+            color = if (selectedModelUsage.isQuotaExceeded) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("card_quota_today_status")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Hari ini: ${selectedModelUsage.modelName} ${selectedModelUsage.used}/${selectedModelUsage.limit}",
+                        style = RekapinTypography.captionBold,
+                        color = if (selectedModelUsage.isQuotaExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Perkiraan reset: ${selectedModelUsage.resetTimeFormatted}",
+                        style = RekapinTypography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(
+                    onClick = { onOpenManualQuota(selectedModel) },
+                    shape = RoundedCornerShape(RekapinRadii.sm),
+                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 2.dp),
+                    modifier = Modifier
+                        .height(32.dp)
+                        .testTag("btn_manual_adjust_quota")
+                ) {
+                    Text(
+                        text = "Atur manual",
+                        style = RekapinTypography.captionBold
+                    )
+                }
+            }
+        }
+
+        // Dropdown Button
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { isModelDropdownExpanded = true },
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("dropdown_model_button"),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = selectedModel.ifBlank { "Pilih Model" },
+                        style = RekapinTypography.bodyBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Pilih Model",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = isModelDropdownExpanded,
+                onDismissRequest = { isModelDropdownExpanded = false },
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .testTag("dropdown_model_menu")
+            ) {
+                models.forEachIndexed { index, modelName ->
+                    val isSelected = (modelName == selectedModel)
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = modelName,
+                                    fontFamily = FontFamily.Monospace,
+                                    style = if (isSelected) RekapinTypography.bodyBold else RekapinTypography.body,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isSelected) {
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Terpilih",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            onSelectModel(modelName)
+                            isModelDropdownExpanded = false
+                        },
+                        modifier = Modifier.testTag("menu_item_model_$index")
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanSummaryCard(
+    selectedVideo: SelectedVideo?,
+    segmentPlanSummary: SegmentPlanSummary?,
+    promptCutMode: PromptCutMode,
+    detectedSceneCount: Int?,
+    selectedModelUsage: ModelUsageInfo
+) {
+    RekapinCard(
+        shape = RoundedCornerShape(RekapinRadii.md),
+        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("segment_plan_summary_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(RekapinSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
+        ) {
+            SectionHeader(
+                title = "Ringkasan Rencana",
+                subtitle = if (selectedVideo != null) selectedVideo.displayName else "Pilih video untuk menghitung rencana"
+            )
+
+            if (selectedVideo != null && segmentPlanSummary != null) {
+                val sceneCountText = if (promptCutMode == PromptCutMode.PER_SCENE) {
+                    if (detectedSceneCount != null) "$detectedSceneCount adegan" else "Dihitung saat mulai"
+                } else {
+                    "±${segmentPlanSummary.estimatedScenesCount} adegan"
+                }
+
+                PlanSummaryLine(label = "Jumlah Segmen", value = "${segmentPlanSummary.segmentCount} Segmen (${segmentPlanSummary.segmentDurationLabel})")
+                PlanSummaryLine(label = "Estimasi Permintaan AI", value = "≈ ${segmentPlanSummary.totalRequestsCount} panggilan")
+                PlanSummaryLine(label = "Jumlah Adegan", value = sceneCountText)
+
+                val needed = segmentPlanSummary.totalRequestsCount
+                val remaining = selectedModelUsage.remaining
+                val isInsufficient = remaining < needed
+
+                if (isInsufficient) {
+                    Spacer(modifier = Modifier.height(RekapinSpacing.xs))
+                    Surface(
+                        shape = RoundedCornerShape(RekapinRadii.sm),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("warning_quota_insufficient")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(RekapinSpacing.sm),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Peringatan Kuota",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                            Text(
+                                text = "Sisa kuota model ${selectedModelUsage.modelName} ($remaining) kurang dari estimasi ($needed).",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = RekapinTypography.caption
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Silakan pilih video anime terlebih dahulu untuk melihat ringkasan durasi, pembagian segmen, dan perkiraan jumlah permintaan AI.",
+                    style = RekapinTypography.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanSummaryLine(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -3289,21 +2260,17 @@ private fun ReviewSummaryItem(label: String, value: String) {
     ) {
         Text(
             text = label,
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(0.9f)
+            style = RekapinTypography.caption,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = value,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1.1f)
+            style = RekapinTypography.bodyBold,
+            color = MaterialTheme.colorScheme.onSurface
         )
     }
 }
+
 
 @Composable
 private fun ProgressContent(

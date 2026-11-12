@@ -70,8 +70,18 @@ object AudioActivityDetector {
             val startUs = startSec * 1_000_000L
             val endUs = endSec * 1_000_000L
 
+            val segmentDurationMs = (endSec - startSec) * 1000L
+            val maxDurationMs = maxOf(30_000L, 3 * segmentDurationMs)
+            val startTimeMs = System.currentTimeMillis()
+            var lastOutputTimeMs = System.currentTimeMillis()
+
             while (!outputDone) {
                 currentCoroutineContext().ensureActive()
+                val now = System.currentTimeMillis()
+                if (now - startTimeMs > maxDurationMs || now - lastOutputTimeMs > 10_000L) {
+                    Log.w(TAG, "Audio decode timeout reached (${now - startTimeMs}ms, last output ${now - lastOutputTimeMs}ms ago); releasing codec and returning emptyList.")
+                    return@withContext emptyList()
+                }
                 if (!inputDone) {
                     val inputIndex = codec.dequeueInputBuffer(10_000)
                     if (inputIndex >= 0) {
@@ -96,12 +106,14 @@ object AudioActivityDetector {
                 val outputIndex = codec.dequeueOutputBuffer(info, 10_000)
                 when {
                     outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        lastOutputTimeMs = System.currentTimeMillis()
                         val format = codec.outputFormat
                         sampleRate = format.getIntegerOrDefault(MediaFormat.KEY_SAMPLE_RATE, sampleRate)
                         channelCount = format.getIntegerOrDefault(MediaFormat.KEY_CHANNEL_COUNT, channelCount).coerceAtLeast(1)
                         pcmEncoding = format.getIntegerOrDefault(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
                     }
                     outputIndex >= 0 -> {
+                        lastOutputTimeMs = System.currentTimeMillis()
                         if (info.size > 0) {
                             val output = codec.getOutputBuffer(outputIndex)
                             if (output != null) {

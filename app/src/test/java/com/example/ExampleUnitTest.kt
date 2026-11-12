@@ -1723,4 +1723,107 @@ class ExampleUnitTest {
         val exportNoBible = com.example.ui.components.ExportFormatters.formatFullExport(resultNoBible)
         org.junit.Assert.assertFalse(exportNoBible.contains("E. MEMORI SERI (SERIES BIBLE)"))
     }
+
+    @Test
+    fun testOpeningEndingUniformFramesDoNotProduceSkip() {
+        // Deret frame hitam (hash = 0L, bitCount = 0 < 8) dan putih (hash = -1L, bitCount = 64 > 56)
+        val blackFrames = (0 until 12).map { index ->
+            com.example.util.FrameFingerprint(index * 3L, 0L)
+        }
+        val templateBlack = com.example.util.OpeningEndingFingerprint(blackFrames, emptyList())
+        val currentBlack = com.example.util.OpeningEndingFingerprint(blackFrames, emptyList())
+
+        val skipsBlack = com.example.util.OpeningEndingDetector.findSkips(templateBlack, currentBlack, 1800L)
+        assertNull("Dua deret frame hitam seragam tidak boleh menghasilkan skip opening", skipsBlack.openingEndSec)
+        assertNull("Dua deret frame hitam seragam tidak boleh menghasilkan skip ending", skipsBlack.endingStartSec)
+
+        // Deret frame bervariasi (informative, 8 <= bitCount <= 56) yang sama tetap terdeteksi
+        val random = java.util.Random(12345L)
+        val variedFrames = (0 until 10).map { index ->
+            var h: Long
+            do {
+                h = random.nextLong()
+            } while (java.lang.Long.bitCount(h) !in 8..56)
+            com.example.util.FrameFingerprint(index * 3L, h)
+        }
+        val templateVaried = com.example.util.OpeningEndingFingerprint(variedFrames, emptyList())
+        val currentVaried = com.example.util.OpeningEndingFingerprint(variedFrames, emptyList())
+
+        val skipsVaried = com.example.util.OpeningEndingDetector.findSkips(templateVaried, currentVaried, 1800L)
+        assertNotNull("Deret frame bervariasi yang sama harus terdeteksi sebagai skip", skipsVaried.openingEndSec)
+        assertEquals(30L, skipsVaried.openingEndSec)
+    }
+
+    @Test
+    fun testRepeatedSceneDetectorBlackFramesIgnored() {
+        // Dua deret frame hitam (hash = 0L) berjarak > 30 detik
+        val frames = buildList {
+            repeat(6) { index -> add(com.example.util.FrameFingerprint(index * 5L, 0L)) }
+            repeat(10) { index -> add(com.example.util.FrameFingerprint((index + 6) * 5L, 0L)) }
+        }
+        val matches = com.example.util.RepeatedSceneDetector.findRepeatedRuns(frames, 5L)
+        assertTrue("Deret frame hitam tidak boleh menghasilkan kandidat adegan berulang", matches.isEmpty())
+    }
+
+    @Test
+    fun testApiKeyStorageDecryptFailureWithFakeCipher() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val prefs = context.getSharedPreferences("rekapin_secure_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+
+        val failingCipher = object : com.example.data.prefs.ApiKeyCipher {
+            override fun encrypt(plainText: String): String = "v1:fake_encrypted"
+            override fun decrypt(encryptedText: String): String? = null
+        }
+
+        // Skenario A: Ada data terenkripsi dan ada data plaintext lama sebagai cadangan baca sesi ini
+        prefs.edit()
+            .putString("custom_gemini_api_keys_encrypted", "v1:unreadable_payload")
+            .putString("custom_gemini_api_key", "AIzaSyLegacyFallbackKey")
+            .commit()
+
+        val storageWithFallback = com.example.data.prefs.ApiKeyStorage(context, failingCipher)
+        val keysWithFallback = storageWithFallback.getAllKeys()
+
+        assertTrue("Status keyDecryptFailed harus true saat dekripsi gagal", storageWithFallback.keyDecryptFailed)
+        assertEquals(1, keysWithFallback.size)
+        assertEquals("AIzaSyLegacyFallbackKey", keysWithFallback.first().key)
+        assertEquals("AIzaSyLegacyFallbackKey", storageWithFallback.getEffectiveApiKey())
+        // Plaintext tidak boleh dihapus
+        assertEquals("AIzaSyLegacyFallbackKey", prefs.getString("custom_gemini_api_key", null))
+
+        // Skenario B: Tidak ada data plaintext cadangan (hanya data terenkripsi yang gagal dibuka)
+        prefs.edit().remove("custom_gemini_api_key").remove("custom_gemini_api_keys_json").commit()
+
+        val storageNoFallback = com.example.data.prefs.ApiKeyStorage(context, failingCipher)
+        val keysNoFallback = storageNoFallback.getAllKeys()
+
+        assertTrue(storageNoFallback.keyDecryptFailed)
+        assertTrue(keysNoFallback.isEmpty())
+        assertTrue("hasStoredKeysThatCannotBeDecrypted harus true", storageNoFallback.hasStoredKeysThatCannotBeDecrypted())
+    }
+
+    @Test
+    fun testSettingsSwitchesForOpEdAndRepeatedScenes() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val opEdStorage = com.example.data.prefs.OpeningEndingStorage(context)
+        assertTrue(opEdStorage.isAutoSkipOpEd())
+        opEdStorage.setAutoSkipOpEd(false)
+        org.junit.Assert.assertFalse(opEdStorage.isAutoSkipOpEd())
+        opEdStorage.setAutoSkipOpEd(true)
+        assertTrue(opEdStorage.isAutoSkipOpEd())
+
+        val repeatedStorage = com.example.data.prefs.RepeatedSceneStorage(context)
+        assertTrue(repeatedStorage.isDetectRepeatedScenes())
+        repeatedStorage.setDetectRepeatedScenes(false)
+        org.junit.Assert.assertFalse(repeatedStorage.isDetectRepeatedScenes())
+        repeatedStorage.setDetectRepeatedScenes(true)
+        assertTrue(repeatedStorage.isDetectRepeatedScenes())
+
+        // Skip note persistence
+        opEdStorage.saveSkipNote(999L, "Rentang yang dilewati: OP dilewati sampai 01:30")
+        assertEquals("Rentang yang dilewati: OP dilewati sampai 01:30", opEdStorage.getSkipNote(999L))
+        opEdStorage.remove(999L)
+        assertNull(opEdStorage.getSkipNote(999L))
+    }
 }
