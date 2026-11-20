@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +63,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.AnimeAnalysisEntity
+import com.example.data.model.AnimeAnalysisResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.ui.components.ChoiceChips
 import com.example.ui.components.MergeExportDialog
 import com.example.ui.components.PrimaryActionBar
@@ -239,8 +244,15 @@ fun HistoryScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                     ) {
-                        items(filteredAnalyses, key = { it.id }) { entity ->
+                        items(
+                            items = filteredAnalyses,
+                            key = { it.id },
+                            contentType = { "history_item" }
+                        ) { entity ->
                             val isSelected = selectedIds.contains(entity.id)
+                            val cachedMaxDuration = remember(entity.id, entity.updatedAt) {
+                                getMaxDurationForAnalysis?.invoke(entity.id) ?: 5
+                            }
                             HistoryItemCard(
                                 entity = entity,
                                 isSelectMode = isSelectMode,
@@ -266,7 +278,7 @@ fun HistoryScreen(
                                 },
                                 onDelete = { itemToDelete = entity },
                                 onResume = { onResumeAnalysis(entity.id) },
-                                maxSceneDuration = getMaxDurationForAnalysis?.invoke(entity.id) ?: 5,
+                                maxSceneDuration = cachedMaxDuration,
                                 seriesBibleBuildFailed = failedSeriesBibleBuildIds.contains(entity.id),
                                 isBuildingSeriesBible = seriesBibleBuildInProgressId == entity.id,
                                 onBuildSeriesBibleNow = { onBuildSeriesBibleNow?.invoke(entity.id) }
@@ -279,7 +291,9 @@ fun HistoryScreen(
 
         // Dialog Gabung & Ekspor
         if (showMergeDialog) {
-            val selectedEntities = analyses.filter { selectedIds.contains(it.id) }
+            val selectedEntities = remember(analyses, selectedIds) {
+                analyses.filter { selectedIds.contains(it.id) }
+            }
             MergeExportDialog(
                 selectedAnalyses = selectedEntities,
                 onDismiss = { showMergeDialog = false },
@@ -777,32 +791,62 @@ fun HistoryDetailScreen(
                 .padding(innerPadding)
                 .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm)
         ) {
-            val baseResult = entity.toAnimeAnalysisResult(maxSceneDuration = maxSceneDuration, seriesBible = seriesBible)
-            val continuityNote = continuityWarnings.takeIf { it.isNotEmpty() }?.joinToString(
-                separator = "\n",
-                prefix = "Pemeriksa kontinuitas karakter menemukan perbedaan yang perlu ditinjau:\n- ",
-                transform = { it }
-            )?.replace("\n", "\n- ") ?: ""
-            val repeatedSceneNote = repeatedSceneNotes.takeIf { it.isNotEmpty() }?.joinToString(
-                separator = "\n",
-                prefix = "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- "
-            )?.replace("\n", "\n- ") ?: ""
-            val opEdNote = opEdSkipNote?.takeIf { it.isNotBlank() } ?: ""
-            val combinedNote = listOf(baseResult.note, continuityNote, repeatedSceneNote, opEdNote)
-                .filter { it.isNotBlank() }
-                .distinct()
-                .joinToString("\n\n")
-            val result = baseResult.copy(note = combinedNote)
-            ResultView(
-                result = result,
-                styleName = styleName,
-                narrationModeName = narrationModeName,
-                languageName = languageName,
-                seriesBible = seriesBible,
-                stageTimings = stageTimings,
-                onResultEdited = onResultEdited,
-                modifier = Modifier.fillMaxSize()
-            )
+            val parsedResult by produceState<AnimeAnalysisResult?>(
+                initialValue = null,
+                entity.id,
+                entity.updatedAt,
+                maxSceneDuration,
+                seriesBible,
+                continuityWarnings,
+                repeatedSceneNotes,
+                opEdSkipNote
+            ) {
+                value = withContext(Dispatchers.Default) {
+                    val baseResult = entity.toAnimeAnalysisResult(
+                        maxSceneDuration = maxSceneDuration,
+                        seriesBible = seriesBible
+                    )
+                    val continuityNote = continuityWarnings.takeIf { it.isNotEmpty() }?.joinToString(
+                        separator = "\n",
+                        prefix = "Pemeriksa kontinuitas karakter menemukan perbedaan yang perlu ditinjau:\n- ",
+                        transform = { it }
+                    )?.replace("\n", "\n- ") ?: ""
+                    val repeatedSceneNote = repeatedSceneNotes.takeIf { it.isNotEmpty() }?.joinToString(
+                        separator = "\n",
+                        prefix = "Kandidat adegan berulang berdasarkan kemiripan visual (tinjau manual):\n- "
+                    )?.replace("\n", "\n- ") ?: ""
+                    val opEdNote = opEdSkipNote?.takeIf { it.isNotBlank() } ?: ""
+                    val combinedNote = listOf(baseResult.note, continuityNote, repeatedSceneNote, opEdNote)
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .joinToString("\n\n")
+                    baseResult.copy(note = combinedNote)
+                }
+            }
+
+            val currentResult = parsedResult
+            if (currentResult == null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            } else {
+                ResultView(
+                    result = currentResult,
+                    styleName = styleName,
+                    narrationModeName = narrationModeName,
+                    languageName = languageName,
+                    seriesBible = seriesBible,
+                    stageTimings = stageTimings,
+                    onResultEdited = onResultEdited,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

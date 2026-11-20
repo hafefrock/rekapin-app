@@ -125,7 +125,9 @@ internal fun IdleSetupContent(
     hasApiKey: Boolean
 ) {
     val scrollState = rememberScrollState()
-    val pendingAnalysis = historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
+    val pendingAnalysis = remember(historyList) {
+        historyList.firstOrNull { !it.isCompleted && it.completedSegmentsCount > 0 }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -656,7 +658,9 @@ private fun AnalysisRangeEditor(
 
                 activeThumbTimeSec = if (startMoved) newStart else newEnd
                 activeThumbLabel = if (startMoved) "Awal" else "Akhir"
-                onRangeChanged(newStart, newEnd)
+                if (newStart != currentRangeStart || newEnd != currentRangeEnd) {
+                    onRangeChanged(newStart, newEnd)
+                }
             },
             valueRange = 0f..totalVideoSeconds.toFloat(),
             colors = SliderDefaults.colors(

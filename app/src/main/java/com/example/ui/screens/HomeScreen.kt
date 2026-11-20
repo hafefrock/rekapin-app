@@ -52,7 +52,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +68,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.db.AnimeAnalysisEntity
 import com.example.data.model.AnalysisState
 import com.example.ui.components.KeySelectionDialog
 import com.example.ui.components.ManualQuotaDialog
@@ -85,51 +86,24 @@ import com.example.ui.viewmodel.MainViewModel
 fun HomeScreen(
     viewModel: MainViewModel
 ) {
-    val selectedVideo by viewModel.selectedVideo.collectAsState()
-    val promptInterval by viewModel.promptIntervalSeconds.collectAsState()
-    val segmentDurationOption by viewModel.segmentDurationOption.collectAsState()
-    val segmentPlanSummary by viewModel.segmentPlanSummary.collectAsState()
-    val pendingMatchDialogState by viewModel.pendingMatchDialogState.collectAsState()
-    val analysisState by viewModel.analysisState.collectAsState()
-    val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
-    val apiKeys by viewModel.apiKeys.collectAsState()
-    val activeKeyName by viewModel.activeKeyName.collectAsState()
-
-    val models by viewModel.models.collectAsState()
-    val selectedModel by viewModel.selectedModel.collectAsState()
-    val isAutoSwitchModel by viewModel.isAutoSwitchModel.collectAsState()
-    val narrationLanguage by viewModel.narrationLanguage.collectAsState()
-    val narrationMode by viewModel.narrationMode.collectAsState()
-    val selectedModelUsage by viewModel.selectedModelUsage.collectAsState()
-    val visualStyles by viewModel.visualStyles.collectAsState()
-    val selectedStyle by viewModel.selectedStyle.collectAsState()
-    val analysisRangeStartSec by viewModel.analysisRangeStartSec.collectAsState()
-    val analysisRangeEndSec by viewModel.analysisRangeEndSec.collectAsState()
-    val selectedSeriesSourceId by viewModel.selectedSeriesSourceId.collectAsState()
-    val selectedSeriesSourceName by viewModel.selectedSeriesSourceName.collectAsState()
-    val promptCutMode by viewModel.promptCutMode.collectAsState()
-    val maxSceneDurationSeconds by viewModel.maxSceneDurationSeconds.collectAsState()
-    val detectedSceneCount by viewModel.detectedSceneCount.collectAsState()
-    val isAutoBuildSeriesBible by viewModel.isAutoBuildSeriesBible.collectAsState()
-    val isPrependRecapNarration by viewModel.isPrependRecapNarration.collectAsState()
-    val failedSeriesBibleBuildIds by viewModel.failedSeriesBibleBuildIds.collectAsState()
-    val seriesBibleBuildFailureNotice by viewModel.seriesBibleBuildFailureNotice.collectAsState()
-    val seriesBibleBuildInProgressId by viewModel.seriesBibleBuildInProgressId.collectAsState()
-    val isAutoSkipOpEd by viewModel.isAutoSkipOpEd.collectAsState()
-    val isDetectRepeatedScenes by viewModel.isDetectRepeatedScenes.collectAsState()
-    val showKeyDecryptFailedDialog by viewModel.showKeyDecryptFailedDialog.collectAsState()
-    val requestPacingMode by viewModel.requestPacingMode.collectAsState()
-    val thinkingLevelMode by viewModel.thinkingLevelMode.collectAsState()
-    val latestStageTimings by viewModel.latestStageTimings.collectAsState()
+    val analysisState by viewModel.analysisState.collectAsStateWithLifecycle()
+    val isSettingsOpen by viewModel.isSettingsOpen.collectAsStateWithLifecycle()
+    val activeKeyName by viewModel.activeKeyName.collectAsStateWithLifecycle()
+    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
+    val pendingMatchDialogState by viewModel.pendingMatchDialogState.collectAsStateWithLifecycle()
+    val failedSeriesBibleBuildIds by viewModel.failedSeriesBibleBuildIds.collectAsStateWithLifecycle()
+    val seriesBibleBuildFailureNotice by viewModel.seriesBibleBuildFailureNotice.collectAsStateWithLifecycle()
+    val seriesBibleBuildInProgressId by viewModel.seriesBibleBuildInProgressId.collectAsStateWithLifecycle()
+    val showKeyDecryptFailedDialog by viewModel.showKeyDecryptFailedDialog.collectAsStateWithLifecycle()
 
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
     var manualQuotaModelToEdit by remember { mutableStateOf<String?>(null) }
     var selectedDestination by remember { mutableIntStateOf(0) }
 
-    val historyList by viewModel.historyList.collectAsState()
-    val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
-    val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsState()
+    val historyList by viewModel.historyList.collectAsStateWithLifecycle()
+    val isHistoryOpen by viewModel.isHistoryOpen.collectAsStateWithLifecycle()
+    val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     LaunchedEffect(isHistoryOpen) {
@@ -214,18 +188,10 @@ fun HomeScreen(
 
     // Tampilkan Detail Riwayat jika sedang dipilih
     viewingHistoryItem?.let { historyEntity ->
-        HistoryDetailScreen(
-            entity = historyEntity,
-            styleName = viewModel.getStyleNameForAnalysis(historyEntity.id),
-            narrationModeName = viewModel.getModeNameForAnalysis(historyEntity.id),
-            languageName = narrationLanguage.displayName,
-            maxSceneDuration = viewModel.getMaxDurationForAnalysis(historyEntity.id),
-            seriesBible = viewModel.getSeriesBibleForAnalysis(historyEntity.id),
-            continuityWarnings = viewModel.getContinuityWarningsForAnalysis(historyEntity.id),
-            repeatedSceneNotes = viewModel.getRepeatedSceneNotesForAnalysis(historyEntity.id),
-            opEdSkipNote = viewModel.getOpeningEndingSkipNoteForAnalysis(historyEntity.id),
-            onBack = { viewModel.closeHistoryDetail() },
-            onResume = {
+        HistoryDetailHost(
+            historyEntity = historyEntity,
+            viewModel = viewModel,
+            onStartAnalysis = {
                 requestNotificationAndStart {
                     viewModel.startAnalysis(historyEntity.id)
                 }
@@ -237,9 +203,7 @@ fun HomeScreen(
                 viewModel.closeHistoryDetail()
                 viewModel.closeHistory()
                 selectedDestination = 0
-            },
-            stageTimings = viewModel.getStageTimingsForAnalysis(historyEntity.id),
-            onResultEdited = { edited -> viewModel.saveEditedResult(historyEntity.id, edited) }
+            }
         )
         return
     }
@@ -367,75 +331,10 @@ fun HomeScreen(
         ) {
             when (val state = analysisState) {
                 is AnalysisState.Success -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        // Header Bar with Quick Action
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Hasil Analisis Selesai",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Tersimpan di Riwayat",
-                                    style = RekapinTypography.caption.copy(fontSize = 11.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            FilledTonalButton(
-                                onClick = { viewModel.resetAnalysis() },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.primary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                                modifier = Modifier
-                                    .height(32.dp)
-                                    .wrapContentWidth()
-                                    .testTag("btn_analyze_another")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Ganti Video",
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-
-                        // Hasil Lengkap (Narasi, Lembar Karakter, Timeline Visual Prompt)
-                        ResultView(
-                            result = state.result,
-                            styleName = state.styleName,
-                            narrationModeName = state.result.narrationMode.ifBlank { narrationMode.displayName },
-                            languageName = narrationLanguage.displayName,
-                            stageTimings = latestStageTimings,
-                            onResultEdited = { edited -> viewModel.saveEditedResult(null, edited) },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                    HomeSuccessHost(
+                        state = state,
+                        viewModel = viewModel
+                    )
                 }
 
                 is AnalysisState.Error -> {
@@ -492,54 +391,15 @@ fun HomeScreen(
                 }
 
                 AnalysisState.Idle -> {
-                    IdleSetupContent(
-                        selectedVideo = selectedVideo,
-                        promptInterval = promptInterval,
-                        promptCutMode = promptCutMode,
-                        maxSceneDurationSeconds = maxSceneDurationSeconds,
-                        detectedSceneCount = detectedSceneCount,
-                        onPromptCutModeChanged = { viewModel.setPromptCutMode(it) },
-                        onMaxSceneDurationChanged = { viewModel.setMaxSceneDuration(it) },
-                        segmentDurationOption = segmentDurationOption,
-                        segmentPlanSummary = segmentPlanSummary,
-                        narrationMode = narrationMode,
-                        isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+                    HomeIdleHost(
+                        viewModel = viewModel,
                         historyList = historyList,
-                        models = models,
                         selectedModel = selectedModel,
-                        selectedModelUsage = selectedModelUsage,
-                        visualStyles = visualStyles,
-                        selectedStyle = selectedStyle,
-                        onSelectStyle = { viewModel.selectStyle(it) },
-                        analysisRangeStartSec = analysisRangeStartSec,
-                        analysisRangeEndSec = analysisRangeEndSec,
-                        onRangeChanged = { start, end -> viewModel.setAnalysisRange(start, end) },
-                        onOpenManualQuota = { manualQuotaModelToEdit = it },
-                        onSelectModel = { viewModel.setSelectedModel(it) },
                         onSelectVideoClicked = {
                             videoPickerLauncher.launch(arrayOf("video/*"))
                         },
-                        onClearVideo = { viewModel.clearSelectedVideo() },
-                        onIntervalChanged = { viewModel.setIntervalSeconds(it) },
-                        onSegmentDurationChanged = { viewModel.setSegmentDurationOption(it) },
-                        onStartAnalysis = {
-                            requestNotificationAndStart {
-                                viewModel.startAnalysis()
-                            }
-                        },
-                        onResumeAnalysis = { resumeId ->
-                            requestNotificationAndStart {
-                                viewModel.startAnalysis(resumeId)
-                            }
-                        },
-                        onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
-                        selectedSeriesSourceId = selectedSeriesSourceId,
-                        selectedSeriesSourceName = selectedSeriesSourceName,
-                        selectedSeriesSourceBible = selectedSeriesSourceId?.let { viewModel.getSeriesBibleForAnalysis(it) },
-                        onSelectSeriesSource = { viewModel.selectSeriesSource(it) },
-                        onOpenSettings = { viewModel.openSettings() },
-                        onOpenHistory = { viewModel.openHistory() },
-                        hasApiKey = viewModel.apiKeyStorage.hasApiKey()
+                        onOpenManualQuota = { manualQuotaModelToEdit = it },
+                        requestNotificationAndStart = requestNotificationAndStart
                     )
                 }
             }
@@ -634,53 +494,15 @@ fun HomeScreen(
         }
 
         if (isSettingsOpen) {
-            SettingsDialog(
-                apiKeys = apiKeys,
+            HomeSettingsHost(
+                viewModel = viewModel,
                 activeKeyName = activeKeyName,
-                models = models,
                 selectedModel = selectedModel,
-                isAutoSwitchModel = isAutoSwitchModel,
-                selectedLanguage = narrationLanguage,
-                selectedNarrationMode = narrationMode,
+                isKeyDecryptFailed = showKeyDecryptFailedDialog,
                 onDismiss = {
                     viewModel.closeSettings()
                     selectedDestination = 0
-                },
-                onAddKey = { name, key -> viewModel.addApiKey(name, key) },
-                onRenameKey = { id, newName -> viewModel.renameApiKey(id, newName) },
-                onDeleteKey = { id -> viewModel.deleteApiKey(id) },
-                onSetActiveKey = { id -> viewModel.setActiveApiKey(id) },
-                onAddModel = { model -> viewModel.addModel(model) },
-                onDeleteModel = { model -> viewModel.deleteModel(model) },
-                onMoveModel = { from, to -> viewModel.moveModel(from, to) },
-                onSelectModel = { model -> viewModel.setSelectedModel(model) },
-                onToggleAutoSwitch = { enabled -> viewModel.toggleAutoSwitchModel(enabled) },
-                onSelectLanguage = { lang -> viewModel.setNarrationLanguage(lang) },
-                onSelectNarrationMode = { mode -> viewModel.setNarrationMode(mode) },
-                visualStyles = visualStyles,
-                selectedStyle = selectedStyle,
-                onSelectStyle = { viewModel.selectStyle(it) },
-                onAddCustomStyle = { name, desc -> viewModel.addCustomStyle(name, desc) },
-                onUpdateCustomStyle = { id, name, desc -> viewModel.updateCustomStyle(id, name, desc) },
-                onDeleteCustomStyle = { id -> viewModel.deleteCustomStyle(id) },
-                modelUsageStorage = viewModel.modelUsageStorage,
-                onSetModelLimit = { model, limit -> viewModel.setModelLimit(model, limit) },
-                onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) },
-                onTestKey = { key -> viewModel.testApiKey(key) },
-                isAutoBuildSeriesBible = isAutoBuildSeriesBible,
-                onToggleAutoBuildSeriesBible = { viewModel.toggleAutoBuildSeriesBible(it) },
-                isPrependRecapNarration = isPrependRecapNarration,
-                onTogglePrependRecapNarration = { viewModel.togglePrependRecapNarration(it) },
-                isAutoSkipOpEd = isAutoSkipOpEd,
-                onToggleAutoSkipOpEd = { viewModel.toggleAutoSkipOpEd(it) },
-                isDetectRepeatedScenes = isDetectRepeatedScenes,
-                onToggleDetectRepeatedScenes = { viewModel.toggleDetectRepeatedScenes(it) },
-                isKeyDecryptFailed = showKeyDecryptFailedDialog,
-                onTestKeyWithProgress = { key, onProgress -> viewModel.testApiKey(key, onProgress) },
-                selectedPacingMode = requestPacingMode,
-                onSelectPacingMode = { viewModel.setRequestPacingMode(it) },
-                selectedThinkingLevel = thinkingLevelMode,
-                onSelectThinkingLevel = { viewModel.setThinkingLevelMode(it) }
+                }
             )
         }
 
@@ -740,6 +562,7 @@ fun HomeScreen(
         }
 
         if (showKeySelectionDialog) {
+            val apiKeys by viewModel.apiKeys.collectAsStateWithLifecycle()
             KeySelectionDialog(
                 apiKeys = apiKeys,
                 onDismiss = { showKeySelectionDialog = false },
@@ -756,7 +579,7 @@ fun HomeScreen(
 
         // Dialog Atur Manual Kuota Model
         manualQuotaModelToEdit?.let { modelName ->
-            val usageInfo = viewModel.modelUsageStorage.getUsageInfo(modelName)
+            val usageInfo = remember(modelName) { viewModel.modelUsageStorage.getUsageInfo(modelName) }
             ManualQuotaDialog(
                 modelName = modelName,
                 currentUsage = usageInfo.used,
@@ -770,6 +593,289 @@ fun HomeScreen(
             )
         }
     }
+}
+
+@Composable
+private fun HistoryDetailHost(
+    historyEntity: AnimeAnalysisEntity,
+    viewModel: MainViewModel,
+    onStartAnalysis: () -> Unit,
+    onFinishWithoutCurrentSegment: () -> Unit
+) {
+    val narrationLanguage by viewModel.narrationLanguage.collectAsStateWithLifecycle()
+    val styleName = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getStyleNameForAnalysis(historyEntity.id)
+    }
+    val narrationModeName = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getModeNameForAnalysis(historyEntity.id)
+    }
+    val maxSceneDuration = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getMaxDurationForAnalysis(historyEntity.id)
+    }
+    val seriesBible = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getSeriesBibleForAnalysis(historyEntity.id)
+    }
+    val continuityWarnings = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getContinuityWarningsForAnalysis(historyEntity.id)
+    }
+    val repeatedSceneNotes = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getRepeatedSceneNotesForAnalysis(historyEntity.id)
+    }
+    val opEdSkipNote = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getOpeningEndingSkipNoteForAnalysis(historyEntity.id)
+    }
+    val stageTimings = remember(historyEntity.id, historyEntity.updatedAt) {
+        viewModel.getStageTimingsForAnalysis(historyEntity.id)
+    }
+
+    HistoryDetailScreen(
+        entity = historyEntity,
+        styleName = styleName,
+        narrationModeName = narrationModeName,
+        languageName = narrationLanguage.displayName,
+        maxSceneDuration = maxSceneDuration,
+        seriesBible = seriesBible,
+        continuityWarnings = continuityWarnings,
+        repeatedSceneNotes = repeatedSceneNotes,
+        opEdSkipNote = opEdSkipNote,
+        onBack = { viewModel.closeHistoryDetail() },
+        onResume = onStartAnalysis,
+        onFinishWithoutCurrentSegment = onFinishWithoutCurrentSegment,
+        stageTimings = stageTimings,
+        onResultEdited = { edited -> viewModel.saveEditedResult(historyEntity.id, edited) }
+    )
+}
+
+@Composable
+private fun HomeSuccessHost(
+    state: AnalysisState.Success,
+    viewModel: MainViewModel
+) {
+    val narrationMode by viewModel.narrationMode.collectAsStateWithLifecycle()
+    val narrationLanguage by viewModel.narrationLanguage.collectAsStateWithLifecycle()
+    val latestStageTimings by viewModel.latestStageTimings.collectAsStateWithLifecycle()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Hasil Analisis Selesai",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Tersimpan di Riwayat",
+                    style = RekapinTypography.caption.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            FilledTonalButton(
+                onClick = { viewModel.resetAnalysis() },
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .height(32.dp)
+                    .wrapContentWidth()
+                    .testTag("btn_analyze_another")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Ganti Video",
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
+        ResultView(
+            result = state.result,
+            styleName = state.styleName,
+            narrationModeName = state.result.narrationMode.ifBlank { narrationMode.displayName },
+            languageName = narrationLanguage.displayName,
+            stageTimings = latestStageTimings,
+            onResultEdited = { edited -> viewModel.saveEditedResult(null, edited) },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@Composable
+private fun HomeIdleHost(
+    viewModel: MainViewModel,
+    historyList: List<AnimeAnalysisEntity>,
+    selectedModel: String,
+    onSelectVideoClicked: () -> Unit,
+    onOpenManualQuota: (String) -> Unit,
+    requestNotificationAndStart: (() -> Unit) -> Unit
+) {
+    val selectedVideo by viewModel.selectedVideo.collectAsStateWithLifecycle()
+    val promptInterval by viewModel.promptIntervalSeconds.collectAsStateWithLifecycle()
+    val promptCutMode by viewModel.promptCutMode.collectAsStateWithLifecycle()
+    val maxSceneDurationSeconds by viewModel.maxSceneDurationSeconds.collectAsStateWithLifecycle()
+    val detectedSceneCount by viewModel.detectedSceneCount.collectAsStateWithLifecycle()
+    val segmentDurationOption by viewModel.segmentDurationOption.collectAsStateWithLifecycle()
+    val segmentPlanSummary by viewModel.segmentPlanSummary.collectAsStateWithLifecycle()
+    val narrationMode by viewModel.narrationMode.collectAsStateWithLifecycle()
+    val isAutoBuildSeriesBible by viewModel.isAutoBuildSeriesBible.collectAsStateWithLifecycle()
+    val models by viewModel.models.collectAsStateWithLifecycle()
+    val selectedModelUsage by viewModel.selectedModelUsage.collectAsStateWithLifecycle()
+    val visualStyles by viewModel.visualStyles.collectAsStateWithLifecycle()
+    val selectedStyle by viewModel.selectedStyle.collectAsStateWithLifecycle()
+    val analysisRangeStartSec by viewModel.analysisRangeStartSec.collectAsStateWithLifecycle()
+    val analysisRangeEndSec by viewModel.analysisRangeEndSec.collectAsStateWithLifecycle()
+    val selectedSeriesSourceId by viewModel.selectedSeriesSourceId.collectAsStateWithLifecycle()
+    val selectedSeriesSourceName by viewModel.selectedSeriesSourceName.collectAsStateWithLifecycle()
+
+    val apiKeys by viewModel.apiKeys.collectAsStateWithLifecycle()
+
+    val selectedSeriesBible = remember(selectedSeriesSourceId) {
+        selectedSeriesSourceId?.let { viewModel.getSeriesBibleForAnalysis(it) }
+    }
+    val hasApiKey = remember(apiKeys) {
+        apiKeys.isNotEmpty() || viewModel.apiKeyStorage.hasApiKey()
+    }
+
+    IdleSetupContent(
+        selectedVideo = selectedVideo,
+        promptInterval = promptInterval,
+        promptCutMode = promptCutMode,
+        maxSceneDurationSeconds = maxSceneDurationSeconds,
+        detectedSceneCount = detectedSceneCount,
+        onPromptCutModeChanged = { viewModel.setPromptCutMode(it) },
+        onMaxSceneDurationChanged = { viewModel.setMaxSceneDuration(it) },
+        segmentDurationOption = segmentDurationOption,
+        segmentPlanSummary = segmentPlanSummary,
+        narrationMode = narrationMode,
+        isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+        historyList = historyList,
+        models = models,
+        selectedModel = selectedModel,
+        selectedModelUsage = selectedModelUsage,
+        visualStyles = visualStyles,
+        selectedStyle = selectedStyle,
+        onSelectStyle = { viewModel.selectStyle(it) },
+        analysisRangeStartSec = analysisRangeStartSec,
+        analysisRangeEndSec = analysisRangeEndSec,
+        onRangeChanged = { start, end -> viewModel.setAnalysisRange(start, end) },
+        onOpenManualQuota = onOpenManualQuota,
+        onSelectModel = { viewModel.setSelectedModel(it) },
+        onSelectVideoClicked = onSelectVideoClicked,
+        onClearVideo = { viewModel.clearSelectedVideo() },
+        onIntervalChanged = { viewModel.setIntervalSeconds(it) },
+        onSegmentDurationChanged = { viewModel.setSegmentDurationOption(it) },
+        onStartAnalysis = {
+            requestNotificationAndStart {
+                viewModel.startAnalysis()
+            }
+        },
+        onResumeAnalysis = { resumeId ->
+            requestNotificationAndStart {
+                viewModel.startAnalysis(resumeId)
+            }
+        },
+        onFinishWithoutCurrentSegment = { analysisId -> viewModel.finishWithoutCurrentSegment(analysisId) },
+        selectedSeriesSourceId = selectedSeriesSourceId,
+        selectedSeriesSourceName = selectedSeriesSourceName,
+        selectedSeriesSourceBible = selectedSeriesBible,
+        onSelectSeriesSource = { viewModel.selectSeriesSource(it) },
+        onOpenSettings = { viewModel.openSettings() },
+        onOpenHistory = { viewModel.openHistory() },
+        hasApiKey = hasApiKey
+    )
+}
+
+@Composable
+private fun HomeSettingsHost(
+    viewModel: MainViewModel,
+    activeKeyName: String,
+    selectedModel: String,
+    isKeyDecryptFailed: Boolean,
+    onDismiss: () -> Unit
+) {
+    val apiKeys by viewModel.apiKeys.collectAsStateWithLifecycle()
+    val models by viewModel.models.collectAsStateWithLifecycle()
+    val isAutoSwitchModel by viewModel.isAutoSwitchModel.collectAsStateWithLifecycle()
+    val narrationLanguage by viewModel.narrationLanguage.collectAsStateWithLifecycle()
+    val narrationMode by viewModel.narrationMode.collectAsStateWithLifecycle()
+    val visualStyles by viewModel.visualStyles.collectAsStateWithLifecycle()
+    val selectedStyle by viewModel.selectedStyle.collectAsStateWithLifecycle()
+    val isAutoBuildSeriesBible by viewModel.isAutoBuildSeriesBible.collectAsStateWithLifecycle()
+    val isPrependRecapNarration by viewModel.isPrependRecapNarration.collectAsStateWithLifecycle()
+    val isAutoSkipOpEd by viewModel.isAutoSkipOpEd.collectAsStateWithLifecycle()
+    val isDetectRepeatedScenes by viewModel.isDetectRepeatedScenes.collectAsStateWithLifecycle()
+    val requestPacingMode by viewModel.requestPacingMode.collectAsStateWithLifecycle()
+    val thinkingLevelMode by viewModel.thinkingLevelMode.collectAsStateWithLifecycle()
+
+    SettingsDialog(
+        apiKeys = apiKeys,
+        activeKeyName = activeKeyName,
+        models = models,
+        selectedModel = selectedModel,
+        isAutoSwitchModel = isAutoSwitchModel,
+        selectedLanguage = narrationLanguage,
+        selectedNarrationMode = narrationMode,
+        onDismiss = onDismiss,
+        onAddKey = { name, key -> viewModel.addApiKey(name, key) },
+        onRenameKey = { id, newName -> viewModel.renameApiKey(id, newName) },
+        onDeleteKey = { id -> viewModel.deleteApiKey(id) },
+        onSetActiveKey = { id -> viewModel.setActiveApiKey(id) },
+        onAddModel = { model -> viewModel.addModel(model) },
+        onDeleteModel = { model -> viewModel.deleteModel(model) },
+        onMoveModel = { from, to -> viewModel.moveModel(from, to) },
+        onSelectModel = { model -> viewModel.setSelectedModel(model) },
+        onToggleAutoSwitch = { enabled -> viewModel.toggleAutoSwitchModel(enabled) },
+        onSelectLanguage = { lang -> viewModel.setNarrationLanguage(lang) },
+        onSelectNarrationMode = { mode -> viewModel.setNarrationMode(mode) },
+        visualStyles = visualStyles,
+        selectedStyle = selectedStyle,
+        onSelectStyle = { viewModel.selectStyle(it) },
+        onAddCustomStyle = { name, desc -> viewModel.addCustomStyle(name, desc) },
+        onUpdateCustomStyle = { id, name, desc -> viewModel.updateCustomStyle(id, name, desc) },
+        onDeleteCustomStyle = { id -> viewModel.deleteCustomStyle(id) },
+        modelUsageStorage = viewModel.modelUsageStorage,
+        onSetModelLimit = { model, limit -> viewModel.setModelLimit(model, limit) },
+        onSetModelUsage = { model, usage -> viewModel.setModelUsage(model, usage) },
+        onTestKey = { key -> viewModel.testApiKey(key) },
+        isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+        onToggleAutoBuildSeriesBible = { viewModel.toggleAutoBuildSeriesBible(it) },
+        isPrependRecapNarration = isPrependRecapNarration,
+        onTogglePrependRecapNarration = { viewModel.togglePrependRecapNarration(it) },
+        isAutoSkipOpEd = isAutoSkipOpEd,
+        onToggleAutoSkipOpEd = { viewModel.toggleAutoSkipOpEd(it) },
+        isDetectRepeatedScenes = isDetectRepeatedScenes,
+        onToggleDetectRepeatedScenes = { viewModel.toggleDetectRepeatedScenes(it) },
+        isKeyDecryptFailed = isKeyDecryptFailed,
+        onTestKeyWithProgress = { key, onProgress -> viewModel.testApiKey(key, onProgress) },
+        selectedPacingMode = requestPacingMode,
+        onSelectPacingMode = { viewModel.setRequestPacingMode(it) },
+        selectedThinkingLevel = thinkingLevelMode,
+        onSelectThinkingLevel = { viewModel.setThinkingLevelMode(it) }
+    )
 }
 
 @Composable

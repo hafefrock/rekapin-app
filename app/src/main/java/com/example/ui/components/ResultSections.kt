@@ -67,7 +67,7 @@ internal fun AllResultsSection(
         modifier = Modifier.fillMaxWidth()
     ) {
         if (result.narration.isNotBlank()) {
-            item {
+            item(key = "section_narration", contentType = "narration_card") {
                 SectionHeader(
                     title = narrationTitle,
                     titleStyle = RekapinTypography.bodyBold,
@@ -87,7 +87,7 @@ internal fun AllResultsSection(
             }
         }
 
-        item {
+        item(key = "header_characters", contentType = "section_header") {
             if (result.narration.isNotBlank()) {
                 Spacer(modifier = Modifier.height(RekapinSpacing.sm))
             }
@@ -104,7 +104,7 @@ internal fun AllResultsSection(
         }
 
         if (result.characterSheet.isEmpty()) {
-            item {
+            item(key = "empty_characters", contentType = "empty_hint") {
                 Text(
                     text = "Belum ada karakter spesifik yang terdaftar pada segmen ini.",
                     style = RekapinTypography.caption,
@@ -113,7 +113,11 @@ internal fun AllResultsSection(
                 )
             }
         } else {
-            itemsIndexed(result.characterSheet) { index, charInfo ->
+            itemsIndexed(
+                items = result.characterSheet,
+                key = { index, charInfo -> "char_${index}_${charInfo.name}" },
+                contentType = { _, _ -> "character_card" }
+            ) { index, charInfo ->
                 CharacterCard(
                     charInfo = charInfo,
                     index = index,
@@ -122,7 +126,7 @@ internal fun AllResultsSection(
             }
         }
 
-        item {
+        item(key = "header_timeline", contentType = "section_header") {
             Spacer(modifier = Modifier.height(RekapinSpacing.sm))
             val timelineSubtitle = if (result.intervalSeconds == 0) {
                 val maxDurLabel = if (result.maxSceneDuration == 0) "Tanpa batas" else "${result.maxSceneDuration}s"
@@ -148,7 +152,11 @@ internal fun AllResultsSection(
             )
         }
 
-        itemsIndexed(result.timeline) { index, timelineItem ->
+        itemsIndexed(
+            items = result.timeline,
+            key = { index, item -> "tl_${index}_${item.timestamp}" },
+            contentType = { _, _ -> "timeline_card" }
+        ) { index, timelineItem ->
             TimelineCard(
                 index = index + 1,
                 item = timelineItem,
@@ -159,7 +167,7 @@ internal fun AllResultsSection(
         }
 
         if (result.segmentSummaries.isNotEmpty()) {
-            item {
+            item(key = "header_segments", contentType = "section_header") {
                 Spacer(modifier = Modifier.height(RekapinSpacing.sm))
                 SectionHeader(
                     title = "Ringkasan Segmen (${result.segmentSummaries.size})",
@@ -173,7 +181,11 @@ internal fun AllResultsSection(
                 )
             }
 
-            itemsIndexed(result.segmentSummaries) { index, summary ->
+            itemsIndexed(
+                items = result.segmentSummaries,
+                key = { index, _ -> "seg_$index" },
+                contentType = { _, _ -> "segment_card" }
+            ) { index, summary ->
                 val modelName = result.segmentModels.getOrNull(index).orEmpty()
                 SegmentSummaryCard(
                     index = index + 1,
@@ -185,7 +197,7 @@ internal fun AllResultsSection(
         }
 
         if (seriesBible != null && !seriesBible.isEmpty()) {
-            item {
+            item(key = "section_series_bible", contentType = "series_bible") {
                 Spacer(modifier = Modifier.height(RekapinSpacing.sm))
                 SectionHeader(
                     title = "Memori Seri (Series Bible)",
@@ -209,7 +221,7 @@ internal fun AllResultsSection(
         val hasStageTimings = !stageTimings.isNullOrEmpty() &&
             stageTimings.any { (k, _) -> k != StageTimingStorage.KEY_SEGMENT_COUNT }
         if (hasStageTimings) {
-            item {
+            item(key = "section_stage_timings", contentType = "stage_timings") {
                 Spacer(modifier = Modifier.height(RekapinSpacing.sm))
                 StageTimingsSection(
                     stageTimings = stageTimings!!,
@@ -534,7 +546,11 @@ internal fun CharacterSheetSection(
                 )
             }
         } else {
-            itemsIndexed(characters) { index, char ->
+            itemsIndexed(
+                items = characters,
+                key = { index, char -> "char_tab_${index}_${char.name}" },
+                contentType = { _, _ -> "character_card" }
+            ) { index, char ->
                 CharacterCard(
                     charInfo = char,
                     index = index,
@@ -561,7 +577,7 @@ internal fun TimelineSection(
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
     ) {
-        item {
+        item(key = "header_timeline_tab", contentType = "section_header") {
             val timelineSubtitle = if (intervalSeconds == 0) {
                 val maxDurLabel = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
                 "Mode Per Adegan (Batas: $maxDurLabel) • $styleName"
@@ -586,7 +602,11 @@ internal fun TimelineSection(
             )
         }
 
-        itemsIndexed(timeline) { index, item ->
+        itemsIndexed(
+            items = timeline,
+            key = { index, item -> "tl_tab_${index}_${item.timestamp}" },
+            contentType = { _, _ -> "timeline_card" }
+        ) { index, item ->
             TimelineCard(
                 index = index + 1,
                 item = item,
@@ -610,7 +630,7 @@ internal fun SegmentSummariesSection(
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
     ) {
-        item {
+        item(key = "header_segments_tab", contentType = "section_header") {
             SectionHeader(
                 title = "Ringkasan Segmen (${summaries.size})",
                 titleStyle = RekapinTypography.bodyBold,
@@ -625,7 +645,7 @@ internal fun SegmentSummariesSection(
         }
 
         if (summaries.isEmpty()) {
-            item {
+            item(key = "empty_segments_tab", contentType = "empty_hint") {
                 Text(
                     text = "Belum ada ringkasan segmen yang tercatat.",
                     style = RekapinTypography.caption,
@@ -634,7 +654,11 @@ internal fun SegmentSummariesSection(
                 )
             }
         } else {
-            itemsIndexed(summaries) { index, summary ->
+            itemsIndexed(
+                items = summaries,
+                key = { index, _ -> "seg_tab_$index" },
+                contentType = { _, _ -> "segment_card" }
+            ) { index, summary ->
                 val modelName = models.getOrNull(index).orEmpty()
                 SegmentSummaryCard(
                     index = index + 1,

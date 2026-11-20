@@ -43,9 +43,18 @@ data class AnimeAnalysisEntity(
 
     val formattedDate: String
         get() {
-            val sdf = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale("id", "ID"))
+            val sdf = DATE_FORMATTER.get() ?: createDateFormatter()
             return sdf.format(Date(updatedAt))
         }
+
+    companion object {
+        private val DATE_FORMATTER: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+            createDateFormatter()
+        }
+
+        private fun createDateFormatter(): SimpleDateFormat =
+            SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.forLanguageTag("id-ID"))
+    }
 
     val formattedDuration: String
         get() {

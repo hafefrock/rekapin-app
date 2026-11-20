@@ -529,6 +529,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preScanJob?.cancel()
         latestPreScanDurationMs = 0L
         preScanJob = viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(350L)
             val preScanStartNanos = System.nanoTime()
             try {
                 Log.d(TAG, "Memulai pre-scan cutPoints adegan di background: start=$safeStart, end=$safeEnd")

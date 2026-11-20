@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,6 +61,8 @@ import com.example.data.model.SeriesBible
 import com.example.ui.theme.RekapinRadii
 import com.example.ui.theme.RekapinSpacing
 import com.example.ui.theme.RekapinTypography
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -198,16 +201,24 @@ fun ResultView(
     var selectedTab by remember { mutableIntStateOf(0) }
     val hasNarration = workingResult.narration.isNotBlank()
     val hasTtsContent = hasNarration || workingResult.timeline.isNotEmpty()
-    val sourceVideoSeconds = remember(workingResult) {
+    val sourceVideoSeconds = remember(workingResult.durationFormatted, workingResult.timeline, workingResult.totalSegments) {
         RecapPacingAnalyzer.parseVideoDurationSeconds(workingResult)
     }
-    val pacingReport = remember(workingResult, selectedTtsSource, selectedPacingTarget, selectedTtsPace) {
-        RecapPacingAnalyzer.analyzeResult(
-            result = workingResult,
-            sourceType = selectedTtsSource,
-            targetPreset = selectedPacingTarget,
-            pace = selectedTtsPace
-        )
+    val pacingReport by produceState<OverallPacingReport?>(
+        initialValue = null,
+        workingResult,
+        selectedTtsSource,
+        selectedPacingTarget,
+        selectedTtsPace
+    ) {
+        value = withContext(Dispatchers.Default) {
+            RecapPacingAnalyzer.analyzeResult(
+                result = workingResult,
+                sourceType = selectedTtsSource,
+                targetPreset = selectedPacingTarget,
+                pace = selectedTtsPace
+            )
+        }
     }
     val narasiTabLabel = when {
         effectiveModeName.contains("Dialog", ignoreCase = true) -> "Dialog"
@@ -305,8 +316,16 @@ fun ResultView(
     }
 
     if (showPacingDialog) {
+        val activePacingReport = pacingReport ?: remember(workingResult, selectedTtsSource, selectedPacingTarget, selectedTtsPace) {
+            RecapPacingAnalyzer.analyzeResult(
+                result = workingResult,
+                sourceType = selectedTtsSource,
+                targetPreset = selectedPacingTarget,
+                pace = selectedTtsPace
+            )
+        }
         PacingAnalysisDialog(
-            report = pacingReport,
+            report = activePacingReport,
             selectedSource = selectedTtsSource,
             onSelectSource = { selectedTtsSource = it },
             selectedTargetPreset = selectedPacingTarget,
