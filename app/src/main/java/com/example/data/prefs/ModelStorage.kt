@@ -13,14 +13,24 @@ class ModelStorage(context: Context) {
         // Hapus gemini-2.5-flash yang sudah tidak tersedia dari server dan aktifkan gemini-3.8-flash
         val currentModels = getModels().toMutableList()
         currentModels.remove("gemini-2.5-flash")
+
+        val migratedRemove37 = prefs.getBoolean(KEY_MIGRATED_REMOVE_3_7_FLASH, false)
+        if (!migratedRemove37) {
+            currentModels.remove("gemini-3.7-flash")
+        }
+
         if (!currentModels.contains("gemini-3.8-flash")) {
             currentModels.add(0, "gemini-3.8-flash")
         }
         saveModelsInternal(currentModels)
 
         val selected = prefs.getString(KEY_SELECTED_MODEL, "")?.trim().orEmpty()
-        if (selected == "gemini-2.5-flash" || selected.isBlank()) {
+        if (selected == "gemini-2.5-flash" || (!migratedRemove37 && selected == "gemini-3.7-flash") || selected.isBlank()) {
             setSelectedModel("gemini-3.8-flash")
+        }
+
+        if (!migratedRemove37) {
+            prefs.edit().putBoolean(KEY_MIGRATED_REMOVE_3_7_FLASH, true).apply()
         }
     }
 
@@ -134,12 +144,12 @@ class ModelStorage(context: Context) {
         private const val KEY_SELECTED_MODEL = "selected_gemini_model"
         private const val KEY_AUTO_SWITCH_QUOTA = "auto_switch_model_on_quota"
         private const val KEY_MIGRATED_25_FLASH = "migrated_to_gemini_2_5_flash"
+        private const val KEY_MIGRATED_REMOVE_3_7_FLASH = "migrated_remove_gemini_3_7_flash"
 
         val DEFAULT_MODEL = GeminiConstants.GEMINI_MODEL
         val DEFAULT_MODELS = listOf(
             "gemini-3.8-flash",
             "gemini-3.6-flash",
-            "gemini-3.7-flash",
             "gemini-3.5-flash-lite"
         )
     }

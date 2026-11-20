@@ -2,11 +2,12 @@ package com.example.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,7 +19,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,10 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.RekapinRadii
+import com.example.ui.theme.RekapinSpacing
+import com.example.ui.theme.RekapinTypography
 
 @Composable
 fun ManualQuotaDialog(
@@ -51,7 +54,7 @@ fun ManualQuotaDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(RekapinRadii.lg),
         containerColor = MaterialTheme.colorScheme.surface,
         modifier = Modifier.testTag("dialog_manual_quota"),
         title = {
@@ -59,48 +62,40 @@ fun ManualQuotaDialog(
                 Icon(
                     imageVector = Icons.Default.Tune,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Atur Kuota Model",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        style = RekapinTypography.bodyBold.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = modelName,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary
+                        style = RekapinTypography.caption.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
         },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
             ) {
                 Text(
-                    text = "Aplikasi hanya menghitung permintaan dari perangkat ini. Sesuaikan hitungan terpakai atau batas harian untuk model ini.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 15.sp
+                    text = "Hitungan hanya dari perangkat ini.",
+                    style = RekapinTypography.caption.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 // Input Terpakai Hari Ini
-                Column {
-                    Text(
-                        text = "Permintaan Terpakai Hari Ini",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
+                Column(verticalArrangement = Arrangement.spacedBy(RekapinSpacing.xs)) {
+                    CompactTextField(
                         value = usageText,
                         onValueChange = { input ->
                             if (input.all { it.isDigit() }) {
@@ -108,71 +103,71 @@ fun ManualQuotaDialog(
                                 errorMessage = null
                             }
                         },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = "Permintaan Terpakai Hari Ini",
                         singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_manual_usage")
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = errorMessage != null && (usageText.toIntOrNull()?.let { it < 0 } ?: true),
+                        fieldModifier = Modifier.testTag("input_manual_usage"),
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                     ) {
                         TextButton(
                             onClick = { usageText = "0" },
-                            modifier = Modifier.testTag("btn_reset_usage_zero")
+                            contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_reset_usage_zero")
                         ) {
-                            Text("Reset ke 0", fontSize = 11.sp)
+                            Text(
+                                text = "Reset ke 0",
+                                style = RekapinTypography.captionBold.copy(fontSize = 11.sp)
+                            )
                         }
                         TextButton(
                             onClick = {
                                 val limitVal = limitText.toIntOrNull() ?: currentLimit
                                 usageText = limitVal.toString()
                             },
-                            modifier = Modifier.testTag("btn_set_usage_full")
+                            contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_set_usage_full")
                         ) {
-                            Text("Set Penuh", fontSize = 11.sp)
+                            Text(
+                                text = "Set Penuh",
+                                style = RekapinTypography.captionBold.copy(fontSize = 11.sp)
+                            )
                         }
                     }
                 }
 
                 // Input Batas Harian
-                Column {
-                    Text(
-                        text = "Batas Harian (Permintaan / Hari Pasifik)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = limitText,
-                        onValueChange = { input ->
-                            if (input.all { it.isDigit() }) {
-                                limitText = input
-                                errorMessage = null
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        supportingText = {
-                            Text(
-                                text = "Bawaan: $defaultLimit permintaan/hari",
-                                fontSize = 10.sp
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("input_manual_limit")
-                    )
-                }
+                CompactTextField(
+                    value = limitText,
+                    onValueChange = { input ->
+                        if (input.all { it.isDigit() }) {
+                            limitText = input
+                            errorMessage = null
+                        }
+                    },
+                    label = "Batas Harian (Permintaan / Hari Pasifik)",
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = "Bawaan: $defaultLimit permintaan/hari",
+                    isError = errorMessage != null && (limitText.toIntOrNull()?.let { it <= 0 } ?: true),
+                    fieldModifier = Modifier.testTag("input_manual_limit"),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 if (errorMessage != null) {
                     Text(
                         text = errorMessage!!,
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp
+                        style = RekapinTypography.caption.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
             }
@@ -196,19 +191,25 @@ fun ManualQuotaDialog(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("btn_save_manual_quota")
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
+                modifier = Modifier
+                    .height(36.dp)
+                    .testTag("btn_save_manual_quota")
             ) {
-                Text("Simpan", fontWeight = FontWeight.Bold)
+                Text("Simpan", style = RekapinTypography.captionBold)
             }
         },
         dismissButton = {
             OutlinedButton(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("btn_cancel_manual_quota")
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
+                modifier = Modifier
+                    .height(36.dp)
+                    .testTag("btn_cancel_manual_quota")
             ) {
-                Text("Batal")
+                Text("Batal", style = RekapinTypography.captionBold)
             }
         }
     )

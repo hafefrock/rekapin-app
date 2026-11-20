@@ -6,9 +6,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -30,30 +32,27 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,13 +73,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.db.AnimeAnalysisEntity
-import com.example.data.model.AnimeAnalysisResult
+import com.example.ui.theme.RekapinRadii
+import com.example.ui.theme.RekapinSpacing
+import com.example.ui.theme.RekapinTypography
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MergeExportDialog(
     selectedAnalyses: List<AnimeAnalysisEntity>,
@@ -114,6 +114,24 @@ fun MergeExportDialog(
         val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
         "rekapin_gabungan_${dateFormat.format(Date())}.txt"
     }
+    val defaultSrtFileName = remember {
+        val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        "rekapin_gabungan_${dateFormat.format(Date())}.srt"
+    }
+    val defaultTtsFileName = remember {
+        val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        "rekapin_gabungan_tts_${dateFormat.format(Date())}.txt"
+    }
+
+    var showSrtDialog by remember { mutableStateOf(false) }
+    var selectedSrtMode by remember { mutableStateOf(SubtitleSourceMode.DEFAULT) }
+
+    var showTtsDialog by remember { mutableStateOf(false) }
+    var selectedTtsSource by remember { mutableStateOf(TtsSourceType.DEFAULT) }
+    var selectedTtsPause by remember { mutableStateOf(TtsPauseStyle.DEFAULT) }
+    var selectedTtsPace by remember { mutableStateOf(TtsReadingPace.DEFAULT) }
+
+    var showFindReplaceDialog by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -140,6 +158,50 @@ fun MergeExportDialog(
         }
     }
 
+    val exportSrtLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/x-subrip")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val srtText = SubtitleExporter.formatMergedSrt(
+                    items = orderedEntities,
+                    mode = selectedSrtMode
+                )
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(srtText.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                }
+                showSrtDialog = false
+                Toast.makeText(context, "Subtitle .srt gabungan berhasil disimpan!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Gagal menyimpan subtitle: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val exportTtsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val ttsText = TtsScriptExporter.formatMergedTtsScript(
+                    items = orderedEntities,
+                    customMergedNarration = if (useAiNarration) aiMergedNarration else null,
+                    sourceType = selectedTtsSource,
+                    pauseStyle = selectedTtsPause
+                )
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(ttsText.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                }
+                showTtsDialog = false
+                Toast.makeText(context, "Naskah TTS gabungan berhasil disimpan!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Gagal menyimpan naskah TTS: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Teks pratinjau yang reaktif
     val previewText = remember(
         orderedEntities,
@@ -162,6 +224,100 @@ fun MergeExportDialog(
         )
     }
 
+    if (showSrtDialog) {
+        val mergedSrt = remember(orderedEntities, selectedSrtMode) {
+            SubtitleExporter.formatMergedSrt(orderedEntities, selectedSrtMode)
+        }
+        SubtitleExportDialog(
+            selectedMode = selectedSrtMode,
+            onSelectMode = { selectedSrtMode = it },
+            srtContent = mergedSrt,
+            onCopy = {
+                clipboard.setText(AnnotatedString(mergedSrt))
+                Toast.makeText(context, "Subtitle .srt gabungan tersalin ke clipboard!", Toast.LENGTH_SHORT).show()
+            },
+            onSave = {
+                try {
+                    exportSrtLauncher.launch(defaultSrtFileName)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Gagal membuka penyimpan: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { showSrtDialog = false }
+        )
+    }
+
+    if (showTtsDialog) {
+        val mergedTts = remember(orderedEntities, aiMergedNarration, useAiNarration, selectedTtsSource, selectedTtsPause) {
+            TtsScriptExporter.formatMergedTtsScript(
+                items = orderedEntities,
+                customMergedNarration = if (useAiNarration) aiMergedNarration else null,
+                sourceType = selectedTtsSource,
+                pauseStyle = selectedTtsPause
+            )
+        }
+        val totalMergedSec = remember(orderedEntities) {
+            orderedEntities.sumOf { (it.durationMs / 1_000L).coerceAtLeast(0L) }
+        }
+        TtsExportDialog(
+            selectedSource = selectedTtsSource,
+            onSelectSource = { selectedTtsSource = it },
+            selectedPauseStyle = selectedTtsPause,
+            onSelectPauseStyle = { selectedTtsPause = it },
+            selectedPace = selectedTtsPace,
+            onSelectPace = { selectedTtsPace = it },
+            ttsScript = mergedTts,
+            onCopy = {
+                clipboard.setText(AnnotatedString(mergedTts))
+                Toast.makeText(context, "Naskah TTS gabungan tersalin ke clipboard!", Toast.LENGTH_SHORT).show()
+            },
+            onSave = {
+                try {
+                    exportTtsLauncher.launch(defaultTtsFileName)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Gagal membuka penyimpan: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { showTtsDialog = false },
+            sourceVideoSeconds = totalMergedSec.takeIf { it > 0L }
+        )
+    }
+
+    if (showFindReplaceDialog) {
+        MergedFindReplaceDialog(
+            matchCountProvider = { find, ignoreCase, wholeWord ->
+                val baseCount = ResultEditHelpers.previewReplaceSummaryInEntities(
+                    entities = orderedEntities,
+                    findText = find,
+                    ignoreCase = ignoreCase,
+                    wholeWord = wholeWord
+                )
+                val aiCount = aiMergedNarration?.let {
+                    ResultEditHelpers.countOccurrences(it, find, ignoreCase, wholeWord)
+                } ?: 0
+                baseCount + aiCount
+            },
+            onApply = { find, replace, ignoreCase, wholeWord ->
+                orderedEntities = ResultEditHelpers.replaceTermInEntities(
+                    entities = orderedEntities,
+                    findText = find,
+                    replaceText = replace,
+                    ignoreCase = ignoreCase,
+                    wholeWord = wholeWord
+                )
+                aiMergedNarration = aiMergedNarration?.let { currentAi ->
+                    val flags = if (ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+                    val escaped = Regex.escape(find)
+                    val pat = if (wholeWord) """(?<![\p{L}\p{N}_])$escaped(?![\p{L}\p{N}_])""" else escaped
+                    Regex(pat, flags).replace(currentAi, Regex.escapeReplacement(replace))
+                }
+                showFindReplaceDialog = false
+                Toast.makeText(context, "Teks gabungan diperbarui sebelum ekspor!", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showFindReplaceDialog = false }
+        )
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -170,108 +326,223 @@ fun MergeExportDialog(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.92f)
-                .clip(RoundedCornerShape(20.dp)),
+                .clip(RoundedCornerShape(RekapinRadii.lg)),
             color = MaterialTheme.colorScheme.background,
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(RekapinRadii.lg)
         ) {
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = RekapinSpacing.xs, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Tutup",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(RekapinSpacing.xs))
                                 Icon(
                                     imageVector = Icons.Default.Layers,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
+                                Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "Gabung & Ekspor",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        style = RekapinTypography.bodyBold.copy(
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${orderedEntities.size} Video Dipilih",
-                                        fontSize = 11.sp,
+                                        style = RekapinTypography.caption.copy(fontSize = 11.sp),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = onDismiss) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Tutup",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        )
-                    )
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                            )
+                        }
+                    }
                 },
                 bottomBar = {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 6.dp,
+                        tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    clipboard.setText(AnnotatedString(previewText))
-                                    Toast.makeText(context, "Teks gabungan tersalin ke clipboard!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("btn_copy_merged"),
-                                shape = RoundedCornerShape(10.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Salin Semua", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                OutlinedButton(
+                                    onClick = { showFindReplaceDialog = true },
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .testTag("btn_edit_merged_words"),
+                                    shape = RoundedCornerShape(RekapinRadii.sm)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Text(
+                                        text = "Edit Kata",
+                                        style = RekapinTypography.captionBold.copy(fontSize = 12.sp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showSrtDialog = true },
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .testTag("btn_export_merged_srt"),
+                                    shape = RoundedCornerShape(RekapinRadii.sm)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Subtitles,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Text(
+                                        text = "Ekspor .srt",
+                                        style = RekapinTypography.captionBold.copy(fontSize = 12.sp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showTtsDialog = true },
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .testTag("btn_export_merged_tts"),
+                                    shape = RoundedCornerShape(RekapinRadii.sm)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RecordVoiceOver,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Text(
+                                        text = "Naskah TTS",
+                                        style = RekapinTypography.captionBold.copy(fontSize = 12.sp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
 
-                            Button(
-                                onClick = {
-                                    try {
-                                        exportLauncher.launch(defaultFileName)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Gagal membuka penyimpan: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("btn_export_merged_txt"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.FileDownload,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Ekspor .txt", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(previewText))
+                                        Toast.makeText(context, "Teks gabungan tersalin ke clipboard!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                        .testTag("btn_copy_merged"),
+                                    shape = RoundedCornerShape(RekapinRadii.sm)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Text(
+                                        text = "Salin",
+                                        style = RekapinTypography.bodyBold.copy(fontSize = 12.sp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            exportLauncher.launch(defaultFileName)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Gagal membuka penyimpan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                        .testTag("btn_export_merged_txt"),
+                                    shape = RoundedCornerShape(RekapinRadii.sm),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FileDownload,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                    Text(
+                                        text = "Ekspor .txt",
+                                        style = RekapinTypography.bodyBold.copy(fontSize = 12.sp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -281,58 +552,58 @@ fun MergeExportDialog(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                 ) {
                     // SEKSI 1: URUTAN VIDEO
                     item {
                         Text(
                             text = "1. Urutan Penggabungan Video",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = RekapinTypography.bodyBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
                     }
 
                     itemsIndexed(orderedEntities) { index, entity ->
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        RekapinCard(
+                            shape = RoundedCornerShape(RekapinRadii.md),
+                            containerColor = MaterialTheme.colorScheme.surface,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(
                                     width = 1.dp,
                                     color = MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = RoundedCornerShape(RekapinRadii.md)
                                 )
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(RekapinRadii.sm))
                                         .background(MaterialTheme.colorScheme.primaryContainer),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "${index + 1}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
+                                        style = RekapinTypography.captionBold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
+                                Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
                                     Text(
                                         text = entity.videoName,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
+                                        style = RekapinTypography.bodyBold.copy(fontSize = 13.sp),
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -341,7 +612,7 @@ fun MergeExportDialog(
                                     val ss = durSec % 60
                                     Text(
                                         text = String.format(Locale.US, "Durasi %02d:%02d • %d segmen", mm, ss, entity.totalSegments),
-                                        fontSize = 10.sp,
+                                        style = RekapinTypography.caption.copy(fontSize = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -356,7 +627,7 @@ fun MergeExportDialog(
                                             }
                                         },
                                         enabled = (index > 0),
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier.size(34.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowUpward,
@@ -374,7 +645,7 @@ fun MergeExportDialog(
                                             }
                                         },
                                         enabled = (index < orderedEntities.size - 1),
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier.size(34.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ArrowDownward,
@@ -389,21 +660,23 @@ fun MergeExportDialog(
 
                     // SEKSI 2: BAGIAN YANG IKUT DIGABUNG
                     item {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
                         Text(
                             text = "2. Bagian yang Ikut Digabung",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = RekapinTypography.bodyBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
 
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        RekapinCard(
+                            shape = RoundedCornerShape(RekapinRadii.md),
+                            containerColor = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
                                 CheckboxOption(
                                     label = "Narasi Alur Cerita",
                                     checked = includeNarration,
@@ -441,29 +714,28 @@ fun MergeExportDialog(
 
                     // SEKSI 3: SATUKAN NARASI DENGAN AI (OPSIONAL)
                     item {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
                         Text(
                             text = "3. Satukan Narasi dengan AI (Opsional)",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = RekapinTypography.bodyBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
 
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            ),
+                        RekapinCard(
+                            shape = RoundedCornerShape(RekapinRadii.md),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Column(
+                                modifier = Modifier.padding(RekapinSpacing.md),
+                                verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
+                            ) {
                                 Text(
-                                    text = "Menggabungkan narasi tiap video menjadi satu cerita mengalir dengan transisi halus tanpa menambah kejadian baru.",
-                                    fontSize = 11.sp,
+                                    text = "Satukan narasi jadi satu cerita mengalir (1 permintaan AI)",
+                                    style = RekapinTypography.caption,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
 
                                 Button(
                                     onClick = {
@@ -490,13 +762,15 @@ fun MergeExportDialog(
                                         }
                                     },
                                     enabled = !isMergingAi,
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(RekapinRadii.md),
+                                    contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .height(40.dp)
                                         .testTag("btn_merge_narrations_ai")
                                 ) {
                                     if (isMergingAi) {
@@ -505,70 +779,81 @@ fun MergeExportDialog(
                                             strokeWidth = 2.dp,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(aiStatusMessage.ifBlank { "Sedang menyatukan..." }, fontSize = 11.sp)
+                                        Spacer(modifier = Modifier.width(RekapinSpacing.sm))
+                                        Text(
+                                            text = aiStatusMessage.ifBlank { "Sedang menyatukan..." },
+                                            style = RekapinTypography.caption.copy(fontSize = 11.sp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     } else {
                                         Icon(
                                             imageVector = Icons.Default.AutoAwesome,
                                             contentDescription = null,
                                             modifier = Modifier.size(16.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Satukan narasi dengan AI", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                        Text(
+                                            text = "Satukan narasi dengan AI",
+                                            style = RekapinTypography.bodyBold.copy(fontSize = 13.sp)
+                                        )
                                     }
                                 }
 
                                 if (aiErrorMessage != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Card(
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.errorContainer
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(RekapinRadii.sm))
+                                            .background(MaterialTheme.colorScheme.errorContainer)
+                                            .padding(RekapinSpacing.sm)
                                     ) {
                                         Text(
                                             text = "Gagal memproses dengan AI: $aiErrorMessage. Narasi tetap menggunakan format gabungan sederhana.",
                                             color = MaterialTheme.colorScheme.onErrorContainer,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.padding(8.dp)
+                                            style = RekapinTypography.caption.copy(fontSize = 11.sp)
                                         )
                                     }
                                 }
 
                                 if (aiMergedNarration != null) {
-                                    Spacer(modifier = Modifier.height(10.dp))
                                     Text(
                                         text = "Pilih versi narasi untuk ekspor:",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
+                                        style = RekapinTypography.captionBold.copy(fontSize = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        RadioButton(
-                                            selected = !useAiNarration,
-                                            onClick = { useAiNarration = false }
-                                        )
+                                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 36.dp) {
+                                            RadioButton(
+                                                selected = !useAiNarration,
+                                                onClick = { useAiNarration = false }
+                                            )
+                                        }
                                         Text(
                                             text = "Narasi per bagian",
-                                            fontSize = 12.sp,
-                                            modifier = Modifier.padding(start = 4.dp)
+                                            style = RekapinTypography.caption,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .clickable { useAiNarration = false }
+                                                .padding(start = RekapinSpacing.xs)
                                         )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        RadioButton(
-                                            selected = useAiNarration,
-                                            onClick = { useAiNarration = true }
-                                        )
+                                        Spacer(modifier = Modifier.width(RekapinSpacing.md))
+                                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 36.dp) {
+                                            RadioButton(
+                                                selected = useAiNarration,
+                                                onClick = { useAiNarration = true }
+                                            )
+                                        }
                                         Text(
                                             text = "Narasi gabungan (AI)",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            style = RekapinTypography.captionBold,
                                             color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(start = 4.dp)
+                                            modifier = Modifier
+                                                .clickable { useAiNarration = true }
+                                                .padding(start = RekapinSpacing.xs)
                                         )
                                     }
                                 }
@@ -578,45 +863,44 @@ fun MergeExportDialog(
 
                     // SEKSI 4: PRATINJAU TEKS GABUNGAN
                     item {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
                         Text(
                             text = "4. Pratinjau Teks Gabungan",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = RekapinTypography.bodyBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.xs))
 
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                            ),
+                        RekapinCard(
+                            shape = RoundedCornerShape(RekapinRadii.md),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 120.dp, max = 260.dp)
+                                .heightIn(min = 96.dp, max = 220.dp)
                                 .border(
                                     width = 1.dp,
                                     color = MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = RoundedCornerShape(RekapinRadii.md)
                                 )
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState())
-                                    .padding(12.dp)
+                                    .padding(RekapinSpacing.md)
                             ) {
                                 Text(
                                     text = previewText,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    lineHeight = 15.sp,
+                                    style = RekapinTypography.caption.copy(
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 15.sp
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(RekapinSpacing.sm))
                     }
                 }
             }
@@ -634,16 +918,20 @@ private fun CheckboxOption(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 1.dp)
+            .heightIn(min = 36.dp)
+            .clip(RoundedCornerShape(RekapinRadii.sm))
+            .clickable { onCheckedChange(!checked) }
     ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
-        Spacer(modifier = Modifier.width(4.dp))
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+            Checkbox(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        }
+        Spacer(modifier = Modifier.width(RekapinSpacing.xs))
         Text(
             text = label,
-            fontSize = 12.sp,
+            style = RekapinTypography.caption,
             color = MaterialTheme.colorScheme.onSurface
         )
     }

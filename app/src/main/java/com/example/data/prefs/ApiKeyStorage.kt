@@ -26,15 +26,26 @@ private object AndroidKeyStoreApiKeyCipher : ApiKeyCipher {
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val IV_LENGTH_BYTES = 12
 
+    @Volatile
+    private var cachedKeyStore: KeyStore? = null
+
+    @Volatile
+    private var cachedSecretKey: SecretKey? = null
+
     override fun encrypt(plainText: String): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val iv = cipher.iv
-        val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-        val packed = ByteArray(iv.size + encrypted.size)
-        System.arraycopy(iv, 0, packed, 0, iv.size)
-        System.arraycopy(encrypted, 0, packed, iv.size, encrypted.size)
-        return "v1:" + Base64.encodeToString(packed, Base64.NO_WRAP)
+        return try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            val iv = cipher.iv
+            val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+            val packed = ByteArray(iv.size + encrypted.size)
+            System.arraycopy(iv, 0, packed, 0, iv.size)
+            System.arraycopy(encrypted, 0, packed, iv.size, encrypted.size)
+            "v1:" + Base64.encodeToString(packed, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            clearKeyCache()
+            throw e
+        }
     }
 
     override fun decrypt(encryptedText: String): String? {
@@ -48,15 +59,29 @@ private object AndroidKeyStoreApiKeyCipher : ApiKeyCipher {
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
             String(cipher.doFinal(ciphertext), Charsets.UTF_8)
         } catch (e: Exception) {
+            clearKeyCache()
             Log.e(TAG, "Tidak dapat membuka penyimpanan API key terenkripsi.", e)
             null
         }
     }
 
+    private fun clearKeyCache() {
+        cachedSecretKey = null
+        cachedKeyStore = null
+    }
+
+    @Synchronized
     private fun getOrCreateKey(): SecretKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        cachedSecretKey?.let { return it }
+
+        val keyStore = cachedKeyStore ?: KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.also {
+            cachedKeyStore = it
+        }
         val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-        if (existing != null) return existing
+        if (existing != null) {
+            cachedSecretKey = existing
+            return existing
+        }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(
@@ -69,7 +94,7 @@ private object AndroidKeyStoreApiKeyCipher : ApiKeyCipher {
                 .setRandomizedEncryptionRequired(true)
                 .build()
         )
-        return generator.generateKey()
+        return generator.generateKey().also { cachedSecretKey = it }
     }
 
     private const val TAG = "ApiKeyStorage"
@@ -84,6 +109,9 @@ class ApiKeyStorage internal constructor(
     var keyDecryptFailed: Boolean = false
         private set
 
+    @Volatile
+    private var cachedDecryptedKeys: List<ApiKeyItem>? = null
+
     init {
         migrateExistingKeyIfNeeded()
     }
@@ -91,6 +119,7 @@ class ApiKeyStorage internal constructor(
     /** Migrates legacy plaintext preferences once; secrets are only deleted after encryption succeeds. */
     @Synchronized
     private fun migrateExistingKeyIfNeeded() {
+        cachedDecryptedKeys = null
         val existingEncrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
         if (!existingEncrypted.isNullOrBlank()) {
             val testDecrypt = cipher.decrypt(existingEncrypted)
@@ -162,14 +191,19 @@ class ApiKeyStorage internal constructor(
 
     @Synchronized
     fun getAllKeys(): List<ApiKeyItem> {
+        cachedDecryptedKeys?.let { return it }
+
         val encrypted = prefs.getString(KEY_API_KEYS_ENCRYPTED, null)
         if (!encrypted.isNullOrBlank()) {
             val json = cipher.decrypt(encrypted)
             if (json != null) {
                 keyDecryptFailed = false
                 removeLegacyPlaintextKeys()
-                return parseKeysJson(json)
+                val parsed = parseKeysJson(json)
+                cachedDecryptedKeys = parsed
+                return parsed
             } else {
+                cachedDecryptedKeys = null
                 keyDecryptFailed = true
                 Log.e(TAG, "Gagal mendekripsi data API key dari KeyStore.")
                 val legacy = getLegacyPlaintextKeys()
@@ -187,8 +221,11 @@ class ApiKeyStorage internal constructor(
             if (json != null) {
                 keyDecryptFailed = false
                 removeLegacyPlaintextKeys()
-                return parseKeysJson(json)
+                val parsed = parseKeysJson(json)
+                cachedDecryptedKeys = parsed
+                return parsed
             } else {
+                cachedDecryptedKeys = null
                 keyDecryptFailed = true
                 val legacy = getLegacyPlaintextKeys()
                 if (legacy.isNotEmpty()) {
@@ -213,6 +250,7 @@ class ApiKeyStorage internal constructor(
         val newKey = ApiKeyItem(name = cleanName, key = cleanKey, isActive = isFirst)
         currentKeys.add(newKey)
         val activeId = if (isFirst) newKey.id else getActiveKeyId()
+        cachedDecryptedKeys = null
         saveKeysInternal(currentKeys, activeId)
         return newKey
     }
@@ -224,6 +262,7 @@ class ApiKeyStorage internal constructor(
         val currentKeys = getAllKeys()
         if (currentKeys.none { it.id == id }) return false
         val updated = currentKeys.map { item -> if (item.id == id) item.copy(name = cleanName) else item }
+        cachedDecryptedKeys = null
         saveKeysInternal(updated, getActiveKeyId())
         return true
     }
@@ -234,6 +273,7 @@ class ApiKeyStorage internal constructor(
         if (currentKeys.none { it.id == id }) return false
         val remaining = currentKeys.filterNot { it.id == id }
         val activeId = if (getActiveKeyId() == id) remaining.firstOrNull()?.id.orEmpty() else getActiveKeyId()
+        cachedDecryptedKeys = null
         saveKeysInternal(remaining, activeId)
         return true
     }
@@ -242,6 +282,7 @@ class ApiKeyStorage internal constructor(
     fun setActiveKey(id: String): Boolean {
         val currentKeys = getAllKeys()
         if (currentKeys.none { it.id == id }) return false
+        cachedDecryptedKeys = null
         saveKeysInternal(currentKeys, id)
         return true
     }
@@ -292,6 +333,7 @@ class ApiKeyStorage internal constructor(
     private fun getActiveKeyId(): String = prefs.getString(KEY_ACTIVE_KEY_ID, "") ?: ""
 
     private fun saveKeysInternal(keys: List<ApiKeyItem>, activeId: String) {
+        cachedDecryptedKeys = null
         val jsonArray = JSONArray()
         val resolvedActiveId = if (keys.any { it.id == activeId }) activeId else keys.firstOrNull()?.id.orEmpty()
         keys.forEach { item ->

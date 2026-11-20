@@ -1,11 +1,10 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,14 +25,10 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,12 +40,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ApiKeyItem
+import com.example.ui.theme.RekapinRadii
+import com.example.ui.theme.RekapinSpacing
+import com.example.ui.theme.RekapinTypography
 
 @Composable
 fun KeySelectionDialog(
@@ -66,7 +64,7 @@ fun KeySelectionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(RekapinRadii.lg),
         containerColor = MaterialTheme.colorScheme.surface,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -74,99 +72,88 @@ fun KeySelectionDialog(
                     imageVector = Icons.Default.Key,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(RekapinSpacing.sm))
                 Text(
                     text = "Ganti API Key & Lanjutkan",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
+                    style = RekapinTypography.bodyBold.copy(fontSize = 15.sp),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
             ) {
                 Text(
-                    text = "Pilih API key lain yang masih memiliki kuota, proses analisis akan langsung dilanjutkan.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
+                    text = "Pilih key lain yang masih punya kuota",
+                    style = RekapinTypography.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(14.dp))
 
                 if (showAddForm) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(RekapinRadii.md))
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(12.dp)
+                            .padding(RekapinSpacing.md),
+                        verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                     ) {
                         Text(
                             text = "Tambah & Gunakan Key Baru",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = RekapinTypography.bodyBold.copy(fontSize = 13.sp),
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedTextField(
+                        CompactTextField(
                             value = newKeyName,
                             onValueChange = { newKeyName = it },
-                            label = { Text("Nama Key") },
+                            label = "Nama Key",
                             singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_switch_key_name")
+                            fieldModifier = Modifier.testTag("input_switch_key_name"),
+                            modifier = Modifier.fillMaxWidth()
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
+                        CompactTextField(
                             value = newKeyValue,
                             onValueChange = { newKeyValue = it },
-                            label = { Text("Gemini API Key") },
-                            placeholder = { Text("AIzaSy...") },
+                            label = "Gemini API Key",
+                            placeholder = "AIzaSy...",
                             singleLine = true,
                             visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
-                                IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                IconButton(
+                                    onClick = { isPasswordVisible = !isPasswordVisible },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
                                     Icon(
                                         imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("input_switch_key_val")
+                            fieldModifier = Modifier.testTag("input_switch_key_val"),
+                            modifier = Modifier.fillMaxWidth()
                         )
-
-                        Spacer(modifier = Modifier.height(12.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                         ) {
                             OutlinedButton(
                                 onClick = { showAddForm = false },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
+                                shape = RoundedCornerShape(RekapinRadii.sm),
+                                contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
                             ) {
-                                Text("Batal", fontSize = 12.sp)
+                                Text("Batal", style = RekapinTypography.captionBold)
                             }
 
                             Button(
@@ -181,12 +168,14 @@ fun KeySelectionDialog(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(RekapinRadii.sm),
+                                contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
                                 modifier = Modifier
                                     .weight(1f)
+                                    .height(36.dp)
                                     .testTag("btn_save_switch_key")
                             ) {
-                                Text("Gunakan", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Gunakan", style = RekapinTypography.captionBold)
                             }
                         }
                     }
@@ -194,68 +183,72 @@ fun KeySelectionDialog(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 240.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .heightIn(max = 200.dp),
+                        verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
                     ) {
                         items(apiKeys, key = { it.id }) { item ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (item.isActive) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
-                                    }
-                                ),
+                            RekapinCard(
+                                isSelected = item.isActive,
+                                shape = RoundedCornerShape(RekapinRadii.md),
+                                containerColor = if (item.isActive) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
+                                },
+                                onClick = { onSelectKeyAndResume(item.id) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .border(
-                                        width = if (item.isActive) 1.5.dp else 1.dp,
-                                        color = if (item.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { onSelectKeyAndResume(item.id) }
                                     .testTag("select_key_${item.id}")
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(12.dp),
+                                        .heightIn(min = 40.dp)
+                                        .padding(horizontal = RekapinSpacing.md, vertical = RekapinSpacing.sm),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 text = item.name,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface
+                                                style = RekapinTypography.bodyBold.copy(fontSize = 13.sp),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                             if (item.isActive) {
-                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Spacer(modifier = Modifier.width(RekapinSpacing.xs))
                                                 Box(
                                                     modifier = Modifier
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(MaterialTheme.colorScheme.primary)
+                                                        .clip(RoundedCornerShape(RekapinRadii.sm))
+                                                        .background(MaterialTheme.colorScheme.primaryContainer)
                                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                                 ) {
                                                     Text(
                                                         text = "Aktif Sekarang",
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onPrimary
+                                                        style = RekapinTypography.captionBold.copy(fontSize = 11.sp),
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
                                                     )
                                                 }
                                             }
                                         }
-                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = item.maskedKey,
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            style = RekapinTypography.caption.copy(
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(RekapinSpacing.sm))
 
                                     Button(
                                         onClick = { onSelectKeyAndResume(item.id) },
@@ -263,30 +256,32 @@ fun KeySelectionDialog(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             contentColor = MaterialTheme.colorScheme.onPrimary
                                         ),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("btn_use_key_${item.id}")
+                                        shape = RoundedCornerShape(RekapinRadii.sm),
+                                        contentPadding = PaddingValues(horizontal = RekapinSpacing.sm, vertical = 0.dp),
+                                        modifier = Modifier
+                                            .height(36.dp)
+                                            .testTag("btn_use_key_${item.id}")
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.PlayArrow,
                                             contentDescription = null,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(14.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Pilih", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+                                        Text("Pilih", style = RekapinTypography.captionBold)
                                     }
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
                     OutlinedButton(
                         onClick = { showAddForm = true },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(RekapinRadii.sm),
+                        contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp)
+                            .height(40.dp)
                             .testTag("btn_add_and_use_new_key")
                     ) {
                         Icon(
@@ -294,11 +289,10 @@ fun KeySelectionDialog(
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(RekapinSpacing.xs))
                         Text(
                             text = "Tambah Key Baru",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            style = RekapinTypography.bodyBold.copy(fontSize = 13.sp)
                         )
                     }
                 }
@@ -308,10 +302,13 @@ fun KeySelectionDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("btn_dismiss_select_key")
+                shape = RoundedCornerShape(RekapinRadii.sm),
+                contentPadding = PaddingValues(horizontal = RekapinSpacing.md, vertical = 0.dp),
+                modifier = Modifier
+                    .height(36.dp)
+                    .testTag("btn_dismiss_select_key")
             ) {
-                Text("Batal")
+                Text("Batal", style = RekapinTypography.captionBold)
             }
         }
     )

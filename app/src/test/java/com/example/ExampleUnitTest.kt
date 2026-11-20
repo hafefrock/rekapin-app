@@ -565,14 +565,13 @@ class ExampleUnitTest {
         context.getSharedPreferences("rekapin_model_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         val storage = com.example.data.prefs.ModelStorage(context)
 
-        // 1. Jika belum ada daftar tersimpan, getModels() mengembalikan empat model berurutan:
-        // gemini-3.8-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.5-flash-lite
+        // 1. Jika belum ada daftar tersimpan, getModels() mengembalikan tiga model berurutan:
+        // gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite
         val initialModels = storage.getModels()
-        assertEquals(4, initialModels.size)
+        assertEquals(3, initialModels.size)
         assertEquals("gemini-3.8-flash", initialModels[0])
         assertEquals("gemini-3.6-flash", initialModels[1])
-        assertEquals("gemini-3.7-flash", initialModels[2])
-        assertEquals("gemini-3.5-flash-lite", initialModels[3])
+        assertEquals("gemini-3.5-flash-lite", initialModels[2])
 
         // Model terpilih bawaan tetap yang pertama (gemini-3.8-flash)
         assertEquals("gemini-3.8-flash", storage.getSelectedModel())
@@ -608,6 +607,53 @@ class ExampleUnitTest {
         // Toggle auto-switch
         storage.setAutoSwitchOnQuota(true)
         assertTrue(storage.isAutoSwitchOnQuota())
+    }
+
+    @Test
+    fun testModelStorageMigratesRemoved37FlashOnceAndAllowsManualReAdd() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val prefs = context.getSharedPreferences("rekapin_model_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+
+        // Simulasikan HP dengan daftar model lama dan model terpilih gemini-3.7-flash
+        val oldListJson = org.json.JSONArray(
+            listOf(
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3.7-flash",
+                "gemini-3.5-flash-lite"
+            )
+        ).toString()
+        prefs.edit()
+            .putString("gemini_models_list_json", oldListJson)
+            .putString("selected_gemini_model", "gemini-3.7-flash")
+            .commit()
+
+        val firstStorage = com.example.data.prefs.ModelStorage(context)
+        assertEquals(
+            listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            firstStorage.getModels()
+        )
+        assertEquals("gemini-3.8-flash", firstStorage.getSelectedModel())
+        assertTrue(prefs.getBoolean("migrated_remove_gemini_3_7_flash", false))
+
+        // Membuat ModelStorage kedua kali tidak mengubah apa pun
+        val secondStorage = com.example.data.prefs.ModelStorage(context)
+        assertEquals(
+            listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            secondStorage.getModels()
+        )
+        assertEquals("gemini-3.8-flash", secondStorage.getSelectedModel())
+
+        // Penambahan manual gemini-3.7-flash setelah migrasi tetap berhasil dan bertahan saat dibuat ulang
+        assertTrue(secondStorage.addModel("gemini-3.7-flash"))
+        assertTrue(secondStorage.getModels().contains("gemini-3.7-flash"))
+
+        val thirdStorage = com.example.data.prefs.ModelStorage(context)
+        assertEquals(
+            listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash"),
+            thirdStorage.getModels()
+        )
     }
 
     @Test
@@ -726,7 +772,7 @@ class ExampleUnitTest {
         // 1. Batas harian default: 20 untuk model biasa, 500 untuk flash-lite
         assertEquals(20, storage.getDefaultLimit("gemini-3.8-flash"))
         assertEquals(20, storage.getDefaultLimit("gemini-3.6-flash"))
-        assertEquals(20, storage.getDefaultLimit("gemini-3.7-flash"))
+        assertEquals(20, storage.getDefaultLimit("gemini-3.5-flash"))
         assertEquals(500, storage.getDefaultLimit("gemini-3.5-flash-lite"))
         assertEquals(500, storage.getDefaultLimit("models/GEMINI-2.5-FLASH-LITE-preview"))
 
@@ -1826,4 +1872,1045 @@ class ExampleUnitTest {
         opEdStorage.remove(999L)
         assertNull(opEdStorage.getSkipNote(999L))
     }
+
+    @Test
+    fun testKeyTestElapsedTimeFormatting() {
+        assertEquals("0,0 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(0L))
+        assertEquals("0,0 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(-250L))
+        assertEquals("0,5 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(500L))
+        assertEquals("1,8 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(1800L))
+        assertEquals("12,3 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(12340L))
+        assertEquals("25,0 dtk", com.example.data.api.GeminiApiClient.formatKeyTestElapsed(25000L))
+    }
+
+    @Test
+    fun testKeyTestResultDefaultElapsedMsAndClientTimeouts() {
+        val defaultResult = com.example.data.api.GeminiApiClient.KeyTestResult(
+            isSuccess = true,
+            httpCode = 200,
+            message = "ok"
+        )
+        assertNull(defaultResult.elapsedMs)
+
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "" })
+        val mainClientField = com.example.data.api.GeminiApiClient::class.java.getDeclaredField("client")
+        mainClientField.isAccessible = true
+        val mainHttpClient = mainClientField.get(client) as okhttp3.OkHttpClient
+
+        val testClientField = com.example.data.api.GeminiApiClient::class.java.getDeclaredField("testClient")
+        testClientField.isAccessible = true
+        val testHttpClient = testClientField.get(client) as okhttp3.OkHttpClient
+
+        assertEquals(60_000, mainHttpClient.connectTimeoutMillis)
+        assertEquals(300_000, mainHttpClient.writeTimeoutMillis)
+        assertEquals(300_000, mainHttpClient.readTimeoutMillis)
+
+        assertEquals(10_000, testHttpClient.connectTimeoutMillis)
+        assertEquals(10_000, testHttpClient.writeTimeoutMillis)
+        assertEquals(20_000, testHttpClient.readTimeoutMillis)
+        assertEquals(25_000, testHttpClient.callTimeoutMillis)
+
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+            com.example.data.api.GeminiApiClient.buildModelsValidationEndpoint()
+        )
+    }
+
+    @Test
+    fun testKeyTestTimeoutAndConnectionFailureMessage() = kotlinx.coroutines.runBlocking {
+        assertEquals(
+            "Tidak ada respons dalam 25 detik (jaringan lambat atau server sibuk).",
+            com.example.data.api.GeminiApiClient.KEY_TEST_TIMEOUT_MESSAGE
+        )
+        assertEquals(
+            "Gagal terhubung. Periksa koneksi internet.",
+            com.example.data.api.GeminiApiClient.KEY_TEST_CONNECTION_ERROR_MESSAGE
+        )
+
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "AIzaTestKey" })
+
+        // 1. Gagal terhubung ke port tertutup -> "Gagal terhubung. Periksa koneksi internet. (... dtk)"
+        val closedPort = java.net.ServerSocket(0).use { it.localPort }
+        val connectFailResult = client.testApiKeyWithBase(
+            apiKey = "AIzaTestKey",
+            generateContentBase = "http://127.0.0.1:$closedPort/v1beta/models"
+        )
+        org.junit.Assert.assertFalse(connectFailResult.isSuccess)
+        assertNull(connectFailResult.httpCode)
+        assertTrue(
+            "Pesan gagal terhubung harus diawali KEY_TEST_CONNECTION_ERROR_MESSAGE, aktual: ${connectFailResult.message}",
+            connectFailResult.message.startsWith("Gagal terhubung. Periksa koneksi internet. (")
+        )
+        assertTrue(connectFailResult.message.endsWith(" dtk)"))
+        assertNotNull(connectFailResult.elapsedMs)
+
+        // 2. Simulasi timeout pada tahap pertama GET /models?pageSize=1 -> "Tidak ada respons dalam 25 detik..."
+        java.net.ServerSocket(0).use { server ->
+            val acceptThread = Thread {
+                try {
+                    server.accept().use { socket ->
+                        Thread.sleep(500)
+                        socket.getOutputStream()
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            acceptThread.isDaemon = true
+            acceptThread.start()
+
+            val shortTimeoutClient = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(150, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .callTimeout(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build()
+
+            val timeoutResult = client.testApiKeyWithBase(
+                apiKey = "AIzaTestKey",
+                generateContentBase = "http://127.0.0.1:${server.localPort}/v1beta/models",
+                httpClientOverride = shortTimeoutClient,
+                totalTimeoutMs = 300L
+            )
+            org.junit.Assert.assertFalse(timeoutResult.isSuccess)
+            assertNull(timeoutResult.httpCode)
+            assertTrue(
+                "Pesan timeout harus diawali KEY_TEST_TIMEOUT_MESSAGE, aktual: ${timeoutResult.message}",
+                timeoutResult.message.startsWith("Tidak ada respons dalam 25 detik (jaringan lambat atau server sibuk). (")
+            )
+            assertTrue(timeoutResult.message.endsWith(" dtk)"))
+            assertNotNull(timeoutResult.elapsedMs)
+        }
+    }
+
+    @Test
+    fun testKeyTestTwoStageFlowAndErrorMessages() = kotlinx.coroutines.runBlocking {
+        val client = com.example.data.api.GeminiApiClient(apiKeyProvider = { "AIzaTestKey" })
+
+        // Kasus A: Tahap 1 mengembalikan 401 -> berhenti cepat dengan "Key tidak valid (... dtk)"
+        java.net.ServerSocket(0).use { server ->
+            val requestPaths = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val serverThread = Thread {
+                try {
+                    server.accept().use { socket ->
+                        val reader = socket.getInputStream().bufferedReader()
+                        val requestLine = reader.readLine().orEmpty()
+                        requestPaths.add(requestLine)
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line.isEmpty()) break
+                        }
+                        val body = """{"error":{"code":401,"message":"API key not valid"}}"""
+                        val response = "HTTP/1.1 401 Unauthorized\r\n" +
+                            "Content-Type: application/json\r\n" +
+                            "Content-Length: ${body.toByteArray().size}\r\n" +
+                            "Connection: close\r\n\r\n" +
+                            body
+                        socket.getOutputStream().write(response.toByteArray())
+                        socket.getOutputStream().flush()
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            serverThread.isDaemon = true
+            serverThread.start()
+
+            val progressUpdates = mutableListOf<String>()
+            val res = client.testApiKeyWithBase(
+                apiKey = "AIzaInvalid",
+                generateContentBase = "http://127.0.0.1:${server.localPort}/v1beta/models",
+                onProgress = { progressUpdates.add(it) }
+            )
+            org.junit.Assert.assertFalse(res.isSuccess)
+            assertEquals(401, res.httpCode)
+            assertTrue(res.message.startsWith("Key tidak valid ("))
+            assertTrue(res.message.endsWith(" dtk)"))
+            assertNotNull(res.elapsedMs)
+            assertTrue("Tahap 2 tidak boleh dijalankan jika tahap 1 gagal 401", progressUpdates.isEmpty())
+            assertEquals(1, requestPaths.size)
+            assertTrue(requestPaths.first().startsWith("GET /v1beta/models?pageSize=1"))
+        }
+
+        // Kasus B: Tahap 1 sukses 200 -> emit progress -> Tahap 2 sukses 200
+        java.net.ServerSocket(0).use { server ->
+            val serverThread = Thread {
+                try {
+                    repeat(2) { step ->
+                        server.accept().use { socket ->
+                            val reader = socket.getInputStream().bufferedReader()
+                            val requestLine = reader.readLine().orEmpty()
+                            var contentLength = 0
+                            while (true) {
+                                val line = reader.readLine() ?: break
+                                if (line.isEmpty()) break
+                                if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                                    contentLength = line.substringAfter(":").trim().toIntOrNull() ?: 0
+                                }
+                            }
+                            if (contentLength > 0) {
+                                val buf = CharArray(contentLength)
+                                var read = 0
+                                while (read < contentLength) {
+                                    val r = reader.read(buf, read, contentLength - read)
+                                    if (r <= 0) break
+                                    read += r
+                                }
+                            }
+                            val body = if (step == 0 && requestLine.startsWith("GET ")) {
+                                """{"models":[{"name":"models/gemini-3.8-flash"}]}"""
+                            } else {
+                                """{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}"""
+                            }
+                            val response = "HTTP/1.1 200 OK\r\n" +
+                                "Content-Type: application/json\r\n" +
+                                "Content-Length: ${body.toByteArray().size}\r\n" +
+                                "Connection: close\r\n\r\n" +
+                                body
+                            socket.getOutputStream().write(response.toByteArray())
+                            socket.getOutputStream().flush()
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            serverThread.isDaemon = true
+            serverThread.start()
+
+            val progressUpdates = mutableListOf<String>()
+            val res = client.testApiKeyWithBase(
+                apiKey = "AIzaValidKey",
+                model = "gemini-3.8-flash",
+                generateContentBase = "http://127.0.0.1:${server.localPort}/v1beta/models",
+                onProgress = { progressUpdates.add(it) }
+            )
+            assertTrue(res.isSuccess)
+            assertEquals(200, res.httpCode)
+            assertEquals(listOf("Key valid, memeriksa kuota…"), progressUpdates)
+            assertTrue(res.message.startsWith("Key aktif & kuota tersedia ("))
+            assertTrue(res.message.endsWith(" dtk)"))
+            assertNotNull(res.elapsedMs)
+        }
+    }
+
+    @Test
+    fun testComputePacingWaitMs() {
+        // Mulai pertama: tanpa jeda
+        assertEquals(
+            0L,
+            com.example.data.api.GeminiApiClient.computePacingWaitMs(
+                lastStartMs = null,
+                nowMs = 5_000L,
+                minIntervalMs = 12_000L
+            )
+        )
+
+        // Permintaan sebelumnya sudah memakan waktu >= 12 detik: tidak menunggu
+        assertEquals(
+            0L,
+            com.example.data.api.GeminiApiClient.computePacingWaitMs(
+                lastStartMs = 1_000L,
+                nowMs = 15_000L,
+                minIntervalMs = 12_000L
+            )
+        )
+        assertEquals(
+            0L,
+            com.example.data.api.GeminiApiClient.computePacingWaitMs(
+                lastStartMs = 1_000L,
+                nowMs = 13_000L,
+                minIntervalMs = 12_000L
+            )
+        )
+
+        // Permintaan cepat (selisih 4 detik): menunggu sisa 8 detik
+        assertEquals(
+            8_000L,
+            com.example.data.api.GeminiApiClient.computePacingWaitMs(
+                lastStartMs = 10_000L,
+                nowMs = 14_000L,
+                minIntervalMs = 12_000L
+            )
+        )
+    }
+
+    @Test
+    fun testFormatStageDuration() {
+        assertEquals("0 dtk", com.example.data.prefs.StageTimingStorage.formatDuration(0L))
+        assertEquals("45 dtk", com.example.data.prefs.StageTimingStorage.formatDuration(45_000L))
+        assertEquals("2 mnt 10 dtk", com.example.data.prefs.StageTimingStorage.formatDuration(130_000L))
+        assertEquals("1 j 5 mnt", com.example.data.prefs.StageTimingStorage.formatDuration(3_900_000L))
+    }
+
+    @Test
+    fun testStageTimingStorageAccumulatesOnResume() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val storage = com.example.data.prefs.StageTimingStorage(context)
+        val analysisId = 9001L
+        storage.remove(analysisId)
+
+        // Sesi awal sebelum gagal
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_UPLOAD, 5_000L)
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_VERIFY_FILE, 2_000L)
+        storage.addSegmentTiming(analysisId, durationMs = 10_000L, segmentCount = 1)
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_TOTAL, 20_000L)
+
+        // Lanjutkan (resume) sesi
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_VERIFY_FILE, 500L)
+        storage.addSegmentTiming(analysisId, durationMs = 14_000L, segmentCount = 1)
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_PACING_WAIT, 3_000L)
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_FINAL_NARRATION, 4_000L)
+        storage.addStageDuration(analysisId, com.example.data.prefs.StageTimingStorage.STAGE_TOTAL, 22_000L)
+
+        val timings = storage.getTimings(analysisId)
+        assertEquals(5_000L, timings[com.example.data.prefs.StageTimingStorage.STAGE_UPLOAD])
+        assertEquals(2_500L, timings[com.example.data.prefs.StageTimingStorage.STAGE_VERIFY_FILE])
+        assertEquals(24_000L, timings[com.example.data.prefs.StageTimingStorage.STAGE_SEGMENT_ANALYSIS])
+        assertEquals(2L, timings[com.example.data.prefs.StageTimingStorage.KEY_SEGMENT_COUNT])
+        assertEquals(3_000L, timings[com.example.data.prefs.StageTimingStorage.STAGE_PACING_WAIT])
+        assertEquals(4_000L, timings[com.example.data.prefs.StageTimingStorage.STAGE_FINAL_NARRATION])
+        assertEquals(42_000L, timings[com.example.data.prefs.StageTimingStorage.STAGE_TOTAL])
+
+        storage.remove(analysisId)
+        assertTrue(storage.getTimings(analysisId).isEmpty())
+    }
+
+    @Test
+    fun testApiKeyStorageDecryptionCacheAndInvalidation() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("rekapin_secure_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+
+        var encryptCalls = 0
+        var decryptCalls = 0
+        var failDecrypt = false
+
+        val fakeCipher = object : com.example.data.prefs.ApiKeyCipher {
+            override fun encrypt(plainText: String): String {
+                encryptCalls++
+                return "mock:$plainText"
+            }
+
+            override fun decrypt(encryptedText: String): String? {
+                decryptCalls++
+                if (failDecrypt) return null
+                return if (encryptedText.startsWith("mock:")) encryptedText.removePrefix("mock:") else null
+            }
+        }
+
+        val storage = com.example.data.prefs.ApiKeyStorage(context, fakeCipher)
+        storage.addKey("Key Utama", "AIzaTestKeyOne")
+        assertEquals(1, encryptCalls)
+
+        // Panggilan pertama getAllKeys mendekripsi sekali
+        val firstRead = storage.getAllKeys()
+        assertEquals(1, firstRead.size)
+        assertEquals(1, decryptCalls)
+
+        // Panggilan kedua memakai cache tanpa memanggil cipher.decrypt lagi
+        val secondRead = storage.getAllKeys()
+        assertEquals(1, secondRead.size)
+        assertEquals("AIzaTestKeyOne", secondRead.first().key)
+        assertEquals(1, decryptCalls)
+
+        // Perubahan (renameKey / addKey) membuang cache
+        storage.renameKey(firstRead.first().id, "Key Ganti Nama")
+        val afterRename = storage.getAllKeys()
+        assertEquals("Key Ganti Nama", afterRename.first().name)
+        assertEquals(2, decryptCalls)
+
+        // Panggilan berikutnya kembali memakai cache
+        storage.getAllKeys()
+        assertEquals(2, decryptCalls)
+
+        // Jika dekripsi gagal, cache tidak disimpan
+        storage.addKey("Key Kedua", "AIzaTestKeyTwo")
+        val countBeforeFailure = decryptCalls
+        failDecrypt = true
+        val failedRead = storage.getAllKeys()
+        assertTrue(failedRead.isEmpty())
+        assertTrue(storage.keyDecryptFailed)
+        assertEquals(countBeforeFailure + 1, decryptCalls)
+
+        // Panggilan berikutnya setelah gagal tetap mencoba mendekripsi lagi
+        failDecrypt = false
+        val recoveredRead = storage.getAllKeys()
+        assertEquals(2, recoveredRead.size)
+        assertEquals(countBeforeFailure + 2, decryptCalls)
+    }
+
+    @Test
+    fun testThinkingLevelStorageDefaultsToAutoAndPersists() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("rekapin_thinking_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+
+        val storage = com.example.data.prefs.ThinkingLevelStorage(context)
+        assertEquals(com.example.data.model.ThinkingLevelMode.AUTO, storage.getMode())
+        assertNull(storage.getMode().apiValue)
+
+        storage.setMode(com.example.data.model.ThinkingLevelMode.LOW)
+        assertEquals(com.example.data.model.ThinkingLevelMode.LOW, storage.getMode())
+        assertEquals("low", storage.getMode().apiValue)
+
+        val reloaded = com.example.data.prefs.ThinkingLevelStorage(context)
+        assertEquals(com.example.data.model.ThinkingLevelMode.LOW, reloaded.getMode())
+
+        reloaded.setMode(com.example.data.model.ThinkingLevelMode.MEDIUM)
+        assertEquals("medium", reloaded.getMode().apiValue)
+
+        reloaded.setMode(com.example.data.model.ThinkingLevelMode.HIGH)
+        assertEquals("high", reloaded.getMode().apiValue)
+
+        assertEquals(
+            com.example.data.model.ThinkingLevelMode.AUTO,
+            com.example.data.model.ThinkingLevelMode.fromCode("UNKNOWN")
+        )
+    }
+
+    @Test
+    fun testThinkingConfigPayloadRulesAcrossBuildersAndModels() {
+        var currentLevel: String? = "low"
+        val client = com.example.data.api.GeminiApiClient(
+            apiKeyProvider = { "fake-key" },
+            thinkingLevelProvider = { currentLevel }
+        )
+
+        // 1. gemini-3.8-flash dengan provider non-null -> thinkingConfig terkirim di ketiga jalur
+        val segBody38 = org.json.JSONObject(
+            client.buildSegmentRequestBody("https://files/v1", "video/mp4", 0L, 60L, "Prompt segmen", "gemini-3.8-flash")
+        )
+        assertEquals(
+            "low",
+            segBody38.getJSONObject("generationConfig").getJSONObject("thinkingConfig").getString("thinkingLevel")
+        )
+
+        currentLevel = "medium"
+        val narBody38 = org.json.JSONObject(
+            client.buildFinalNarrationRequestBody("Prompt narasi", "gemini-3.8-flash")
+        )
+        assertEquals(
+            "medium",
+            narBody38.getJSONObject("generationConfig").getJSONObject("thinkingConfig").getString("thinkingLevel")
+        )
+
+        currentLevel = "high"
+        val bibleBody38 = org.json.JSONObject(
+            client.buildSeriesBibleRequestBody("Prompt memori", "gemini-3.8-flash-preview")
+        )
+        assertEquals(
+            "high",
+            bibleBody38.getJSONObject("generationConfig").getJSONObject("thinkingConfig").getString("thinkingLevel")
+        )
+
+        // 2. AUTO (provider == null) -> TIDAK mengirim thinkingConfig bahkan untuk gemini-3.8-flash
+        currentLevel = null
+        val autoSeg = org.json.JSONObject(
+            client.buildSegmentRequestBody("https://files/v1", "video/mp4", 0L, 60L, "Prompt segmen", "gemini-3.8-flash")
+        )
+        org.junit.Assert.assertFalse(autoSeg.getJSONObject("generationConfig").has("thinkingConfig"))
+
+        val autoNar = org.json.JSONObject(
+            client.buildFinalNarrationRequestBody("Prompt narasi", "gemini-3.8-flash")
+        )
+        org.junit.Assert.assertFalse(autoNar.getJSONObject("generationConfig").has("thinkingConfig"))
+
+        val autoBible = org.json.JSONObject(
+            client.buildSeriesBibleRequestBody("Prompt memori", "gemini-3.8-flash")
+        )
+        org.junit.Assert.assertFalse(autoBible.getJSONObject("generationConfig").has("thinkingConfig"))
+
+        // 3. Model lain (gemini-3.6-flash, gemini-3.5-flash-lite) -> TIDAK mengirim thinkingConfig walau provider non-null
+        currentLevel = "high"
+        for (otherModel in listOf("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro")) {
+            val segOther = org.json.JSONObject(
+                client.buildSegmentRequestBody("https://files/v1", "video/mp4", 0L, 60L, "Prompt segmen", otherModel)
+            )
+            org.junit.Assert.assertFalse(segOther.getJSONObject("generationConfig").has("thinkingConfig"))
+
+            val narOther = org.json.JSONObject(
+                client.buildFinalNarrationRequestBody("Prompt narasi", otherModel)
+            )
+            org.junit.Assert.assertFalse(narOther.getJSONObject("generationConfig").has("thinkingConfig"))
+
+            val bibleOther = org.json.JSONObject(
+                client.buildSeriesBibleRequestBody("Prompt memori", otherModel)
+            )
+            org.junit.Assert.assertFalse(bibleOther.getJSONObject("generationConfig").has("thinkingConfig"))
+        }
+    }
+
+    @Test
+    fun testThinkingConfigHttp400FallbackRetriesOnceWithoutThinkingConfig() = kotlinx.coroutines.runBlocking {
+        val receivedBodies = mutableListOf<String>()
+        java.net.ServerSocket(0).use { server ->
+            val serverThread = Thread {
+                try {
+                    for (step in 0..1) {
+                        server.accept().use { socket ->
+                            val input = socket.getInputStream().bufferedReader()
+                            var contentLength = 0
+                            while (true) {
+                                val line = input.readLine() ?: break
+                                if (line.isEmpty()) break
+                                if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                                    contentLength = line.substringAfter(":").trim().toIntOrNull() ?: 0
+                                }
+                            }
+                            val buf = CharArray(contentLength)
+                            var read = 0
+                            while (read < contentLength) {
+                                val r = input.read(buf, read, contentLength - read)
+                                if (r <= 0) break
+                                read += r
+                            }
+                            receivedBodies.add(String(buf, 0, read))
+
+                            val (statusLine, body) = if (step == 0) {
+                                "HTTP/1.1 400 Bad Request" to
+                                    """{"error":{"code":400,"message":"Unknown name \"thinkingLevel\" at thinkingConfig"}}"""
+                            } else {
+                                "HTTP/1.1 200 OK" to
+                                    """{"candidates":[{"content":{"parts":[{"text":"berhasil"}]}}]}"""
+                            }
+                            val response = "$statusLine\r\n" +
+                                "Content-Type: application/json\r\n" +
+                                "Content-Length: ${body.toByteArray().size}\r\n" +
+                                "Connection: close\r\n\r\n" +
+                                body
+                            socket.getOutputStream().write(response.toByteArray())
+                            socket.getOutputStream().flush()
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            serverThread.isDaemon = true
+            serverThread.start()
+
+            val client = com.example.data.api.GeminiApiClient(
+                apiKeyProvider = { "AIzaFakeKey" },
+                pacingModeProvider = { com.example.data.model.RequestPacingMode.NONE },
+                thinkingLevelProvider = { "low" }
+            )
+            val initialPayload = client.buildFinalNarrationRequestBody(
+                prompt = "Test thinking fallback",
+                model = "gemini-3.8-flash"
+            )
+
+            val response = client.executeWithRetry(
+                stage = "Uji Fallback Thinking",
+                url = "http://127.0.0.1:${server.localPort}/v1beta/models/gemini-3.8-flash:generateContent",
+                apiKey = "AIzaFakeKey",
+                jsonBody = initialPayload,
+                modelForCounting = "gemini-3.8-flash",
+                onStatusUpdate = {}
+            )
+
+            assertTrue(response.contains("berhasil"))
+            assertEquals(2, receivedBodies.size)
+
+            val firstGenConfig = org.json.JSONObject(receivedBodies[0]).getJSONObject("generationConfig")
+            assertEquals("low", firstGenConfig.getJSONObject("thinkingConfig").getString("thinkingLevel"))
+
+            val secondGenConfig = org.json.JSONObject(receivedBodies[1]).getJSONObject("generationConfig")
+            org.junit.Assert.assertFalse(secondGenConfig.has("thinkingConfig"))
+        }
+    }
+
+    @Test
+    fun testSubtitleTimestampFormattingAndParsing() {
+        assertEquals("00:00:00,000", com.example.ui.components.SubtitleExporter.formatSrtTimestamp(-50L))
+        assertEquals("00:01:05,250", com.example.ui.components.SubtitleExporter.formatSrtTimestamp(65_250L))
+        assertEquals("01:02:03,004", com.example.ui.components.SubtitleExporter.formatSrtTimestamp(3_723_004L))
+
+        assertEquals(65_000L, com.example.ui.components.SubtitleExporter.parseTimestampToMs("01:05"))
+        assertEquals(65_500L, com.example.ui.components.SubtitleExporter.parseTimestampToMs("[01:05.5]"))
+        assertEquals(3_723_040L, com.example.ui.components.SubtitleExporter.parseTimestampToMs("01:02:03,04"))
+        assertNull(com.example.ui.components.SubtitleExporter.parseTimestampToMs("bukan-waktu"))
+
+        assertEquals(
+            5_000L to 12_000L,
+            com.example.ui.components.SubtitleExporter.parseTimeRangeMs("00:05 – 00:12")
+        )
+        assertEquals(
+            10_000L to 14_000L,
+            com.example.ui.components.SubtitleExporter.parseTimeRangeMs("00:10", nextStartMs = 14_000L)
+        )
+        assertEquals(
+            10_000L to 18_000L,
+            com.example.ui.components.SubtitleExporter.parseTimeRangeMs("00:10", nextStartMs = null, fallbackDurationMs = 8_000L)
+        )
+
+        assertEquals("Episode_01.srt", com.example.ui.components.SubtitleExporter.defaultSrtFileName("Episode_01.mp4"))
+        assertEquals("subtitle_anime.srt", com.example.ui.components.SubtitleExporter.defaultSrtFileName("   "))
+    }
+
+    @Test
+    fun testSubtitleExporterModesAndDeduplication() {
+        val timelineWithSpeech = listOf(
+            TimelineItem(
+                timestamp = "00:00 - 00:05",
+                sceneDescription = "Pemandangan kota di malam hari.",
+                visualPrompt = "night city anime",
+                dialogue = "Kota ini tidak pernah tidur.",
+                originalNarration = ""
+            ),
+            TimelineItem(
+                timestamp = "00:05 - 00:10",
+                sceneDescription = "Tokoh utama berjalan melewati gang.",
+                visualPrompt = "alley walk anime",
+                dialogue = "",
+                originalNarration = ""
+            ),
+            TimelineItem(
+                timestamp = "00:10 - 00:15",
+                sceneDescription = "Dia berhenti di depan gerbang.",
+                visualPrompt = "gate stop anime",
+                dialogue = "Aku harus masuk.",
+                originalNarration = "Aku harus masuk."
+            ),
+            TimelineItem(
+                timestamp = "00:15 - 00:20",
+                sceneDescription = "Gerbang terbuka perlahan.",
+                visualPrompt = "gate opens anime",
+                dialogue = "Siapa di sana?",
+                originalNarration = "Dia mendengar suara langkah."
+            )
+        )
+
+        // AUTO dengan ucapan: pakai ucapan saja, dedup identik, dan gabung originalNarration + dialogue
+        val autoWithSpeech = com.example.ui.components.SubtitleExporter.formatSrt(
+            timeline = timelineWithSpeech,
+            mode = com.example.ui.components.SubtitleSourceMode.AUTO
+        )
+        assertEquals(3, com.example.ui.components.SubtitleExporter.countSrtCues(autoWithSpeech))
+        assertTrue(autoWithSpeech.contains("1\n00:00:00,000 --> 00:00:05,000\nKota ini tidak pernah tidur."))
+        assertTrue(!autoWithSpeech.contains("gang"))
+        assertTrue(autoWithSpeech.contains("2\n00:00:10,000 --> 00:00:15,000\nAku harus masuk.\n\n"))
+        assertTrue(autoWithSpeech.contains("3\n00:00:15,000 --> 00:00:20,000\nDia mendengar suara langkah.\nSiapa di sana?"))
+
+        // DIALOGUE_ONLY harus sama hasilnya untuk daftar dengan ucapan
+        val dialogueOnly = com.example.ui.components.SubtitleExporter.formatSrt(
+            timeline = timelineWithSpeech,
+            mode = com.example.ui.components.SubtitleSourceMode.DIALOGUE_ONLY
+        )
+        assertEquals(autoWithSpeech, dialogueOnly)
+
+        // SCENE_DESCRIPTION memakai deskripsi adegan pada semua entri
+        val sceneOnly = com.example.ui.components.SubtitleExporter.formatSrt(
+            timeline = timelineWithSpeech,
+            mode = com.example.ui.components.SubtitleSourceMode.SCENE_DESCRIPTION
+        )
+        assertEquals(4, com.example.ui.components.SubtitleExporter.countSrtCues(sceneOnly))
+        assertTrue(sceneOnly.contains("Tokoh utama berjalan melewati gang."))
+
+        // AUTO tanpa ucapan sama sekali: fallback ke deskripsi adegan
+        val silentTimeline = listOf(
+            TimelineItem(timestamp = "00:00 - 00:06", sceneDescription = "Pembukaan episode.", visualPrompt = "opening"),
+            TimelineItem(timestamp = "00:06", sceneDescription = "Judul muncul di layar.", visualPrompt = "title")
+        )
+        val autoSilent = com.example.ui.components.SubtitleExporter.formatSrt(
+            timeline = silentTimeline,
+            mode = com.example.ui.components.SubtitleSourceMode.AUTO,
+            intervalSeconds = 4
+        )
+        assertEquals(2, com.example.ui.components.SubtitleExporter.countSrtCues(autoSilent))
+        assertTrue(autoSilent.contains("00:00:06,000 --> 00:00:10,000\nJudul muncul di layar."))
+        assertEquals(
+            "",
+            com.example.ui.components.SubtitleExporter.formatSrt(
+                timeline = silentTimeline,
+                mode = com.example.ui.components.SubtitleSourceMode.DIALOGUE_ONLY
+            )
+        )
+    }
+
+    @Test
+    fun testSubtitleExporterMergedSrtShiftsTimestampsAcrossEpisodes() {
+        val ep1 = AnimeAnalysisEntity(
+            id = 1L,
+            videoUriString = "",
+            videoName = "ep1.mp4",
+            videoSizeBytes = 100L,
+            durationMs = 90_000L, // 1 menit 30 detik
+            mimeType = "video/mp4",
+            intervalSeconds = 5,
+            totalSegments = 1,
+            completedSegmentsCount = 1,
+            geminiFileRemoteName = "",
+            geminiFileUri = "",
+            status = "COMPLETED",
+            characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(emptyList()),
+            timelineJson = AnalysisJsonAdapter.timelineToJson(
+                listOf(
+                    TimelineItem(
+                        timestamp = "00:05 - 00:10",
+                        sceneDescription = "Adegan awal ep 1.",
+                        visualPrompt = "ep1 opening",
+                        dialogue = "Halo dunia."
+                    )
+                )
+            ),
+            segmentSummariesJson = "[]",
+            narration = "",
+            createdAt = 1000L
+        )
+        val ep2 = AnimeAnalysisEntity(
+            id = 2L,
+            videoUriString = "",
+            videoName = "ep2.mp4",
+            videoSizeBytes = 100L,
+            durationMs = 60_000L,
+            mimeType = "video/mp4",
+            intervalSeconds = 5,
+            totalSegments = 1,
+            completedSegmentsCount = 1,
+            geminiFileRemoteName = "",
+            geminiFileUri = "",
+            status = "COMPLETED",
+            characterSheetJson = AnalysisJsonAdapter.characterSheetToJson(emptyList()),
+            timelineJson = AnalysisJsonAdapter.timelineToJson(
+                listOf(
+                    TimelineItem(
+                        timestamp = "00:02 - 00:08",
+                        sceneDescription = "Adegan awal ep 2.",
+                        visualPrompt = "ep2 opening",
+                        dialogue = "Lanjut bertarung!"
+                    )
+                )
+            ),
+            segmentSummariesJson = "[]",
+            narration = "",
+            createdAt = 2000L
+        )
+
+        val mergedSrt = com.example.ui.components.SubtitleExporter.formatMergedSrt(
+            items = listOf(ep1, ep2),
+            mode = com.example.ui.components.SubtitleSourceMode.AUTO
+        )
+
+        assertEquals(2, com.example.ui.components.SubtitleExporter.countSrtCues(mergedSrt))
+        assertTrue(mergedSrt.contains("1\n00:00:05,000 --> 00:00:10,000\nHalo dunia."))
+        // Ep2 bergeser +90 detik -> 01:32 - 01:38
+        assertTrue(mergedSrt.contains("2\n00:01:32,000 --> 00:01:38,000\nLanjut bertarung!"))
+    }
+
+    @Test
+    fun testTtsScriptExporterCleaningPauseStylesAndStats() {
+        assertEquals(
+            "Episode_01_tts.txt",
+            com.example.ui.components.TtsScriptExporter.defaultTtsFileName("Episode_01.mp4")
+        )
+        assertEquals(
+            "naskah_tts_anime.txt",
+            com.example.ui.components.TtsScriptExporter.defaultTtsFileName("   ")
+        )
+
+        val raw = """
+            ### Bagian Awal
+            [00:00 - 00:10] **Riku** memasuki gerbang tua. Dia menatap langit malam!
+            - Suara angin terdengar pelan.
+
+            00:10 - 00:20: "Kita tidak boleh mundur," ucap Riku dengan *tegas*.
+        """.trimIndent()
+
+        val cleaned = com.example.ui.components.TtsScriptExporter.cleanForTts(raw)
+        assertTrue(!cleaned.contains("###"))
+        assertTrue(!cleaned.contains("[00:00 - 00:10]"))
+        assertTrue(!cleaned.contains("00:10 - 00:20"))
+        assertTrue(!cleaned.contains("**"))
+        assertTrue(!cleaned.contains("*tegas*"))
+        assertTrue(cleaned.contains("Riku memasuki gerbang tua."))
+        assertTrue(cleaned.contains("tegas."))
+
+        val result = com.example.data.model.AnimeAnalysisResult(
+            narration = raw,
+            characterSheet = emptyList(),
+            timeline = listOf(
+                TimelineItem(
+                    timestamp = "00:05 - 00:10",
+                    sceneDescription = "Gerbang terbuka.",
+                    visualPrompt = "gate",
+                    dialogue = "Ayo masuk."
+                )
+            ),
+            totalSegments = 1,
+            durationFormatted = "00:20",
+            intervalSeconds = 5
+        )
+
+        val perSentence = com.example.ui.components.TtsScriptExporter.formatTtsScript(
+            result = result,
+            sourceType = com.example.ui.components.TtsSourceType.NARRATION,
+            pauseStyle = com.example.ui.components.TtsPauseStyle.PER_SENTENCE
+        )
+        assertTrue(perSentence.contains("Riku memasuki gerbang tua.\nDia menatap langit malam!\nSuara angin terdengar pelan."))
+
+        val ssml = com.example.ui.components.TtsScriptExporter.formatTtsScript(
+            result = result,
+            sourceType = com.example.ui.components.TtsSourceType.NARRATION,
+            pauseStyle = com.example.ui.components.TtsPauseStyle.SSML_BREAK
+        )
+        assertTrue(ssml.contains("<break time=\"0.6s\" />"))
+
+        val timelineTts = com.example.ui.components.TtsScriptExporter.formatTtsScript(
+            result = result,
+            sourceType = com.example.ui.components.TtsSourceType.TIMELINE_SPEECH
+        )
+        assertEquals("Ayo masuk.", timelineTts)
+
+        // Tag SSML tidak boleh dihitung sebagai kata terucap
+        val statsNoTag = com.example.ui.components.TtsScriptExporter.computeStats(
+            cleaned,
+            com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        val statsWithTag = com.example.ui.components.TtsScriptExporter.computeStats(
+            ssml,
+            com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(statsNoTag.wordCount, statsWithTag.wordCount)
+        assertTrue(statsWithTag.estimatedSeconds >= 1L)
+    }
+
+    @Test
+    fun testTtsScriptExporterMergedScript() {
+        val ep1 = AnimeAnalysisEntity(
+            id = 1L,
+            videoUriString = "",
+            videoName = "ep1.mp4",
+            videoSizeBytes = 100L,
+            durationMs = 60_000L,
+            mimeType = "video/mp4",
+            intervalSeconds = 5,
+            totalSegments = 1,
+            completedSegmentsCount = 1,
+            geminiFileRemoteName = "",
+            geminiFileUri = "",
+            status = "COMPLETED",
+            characterSheetJson = "[]",
+            timelineJson = "[]",
+            segmentSummariesJson = "[]",
+            narration = "[00:00] Pertama, hero tiba di desa."
+        )
+        val ep2 = ep1.copy(
+            id = 2L,
+            videoName = "ep2.mp4",
+            narration = "[00:00] Kedua, pertempuran dimulai."
+        )
+
+        val mergedDefault = com.example.ui.components.TtsScriptExporter.formatMergedTtsScript(
+            items = listOf(ep1, ep2)
+        )
+        assertEquals("Pertama, hero tiba di desa.\n\nKedua, pertempuran dimulai.", mergedDefault)
+        assertTrue(!mergedDefault.contains("Bagian 1"))
+
+        val mergedCustom = com.example.ui.components.TtsScriptExporter.formatMergedTtsScript(
+            items = listOf(ep1, ep2),
+            customMergedNarration = "**Versi AI**: Hero bertarung di desa."
+        )
+        assertEquals("Versi AI: Hero bertarung di desa.", mergedCustom)
+    }
+
+    @Test
+    fun testResultEditHelpersFindReplaceAndCharacterPropagation() {
+        val initial = com.example.data.model.AnimeAnalysisResult(
+            narration = "Kael berjalan bersama Kaelis. Kael menoleh cepat.",
+            characterSheet = listOf(
+                CharacterInfo(name = "Kael", description = "Kael membawa pedang."),
+                CharacterInfo(name = "Kaelis", description = "Teman Kael.")
+            ),
+            timeline = listOf(
+                TimelineItem(
+                    timestamp = "00:00 - 00:05",
+                    sceneDescription = "Kael tersenyum.",
+                    visualPrompt = "Kael smiling anime",
+                    dialogue = "Aku Kael!",
+                    originalNarration = "Kael maju."
+                )
+            ),
+            totalSegments = 1,
+            durationFormatted = "00:05",
+            intervalSeconds = 5,
+            segmentSummaries = listOf("Kael muncul di layar.")
+        )
+
+        // wholeWord = true tidak boleh menyentuh "Kaelis"
+        val summaryWhole = com.example.ui.components.ResultEditHelpers.previewReplaceSummary(
+            result = initial,
+            findText = "Kael",
+            ignoreCase = false,
+            wholeWord = true
+        )
+        assertEquals(2, summaryWhole.narrationMatches)
+        assertEquals(3, summaryWhole.characterMatches) // Kael.name, Kael.desc, Kaelis.desc
+        assertEquals(4, summaryWhole.timelineMatches)
+        assertEquals(1, summaryWhole.segmentMatches)
+        assertEquals(10, summaryWhole.totalMatches)
+
+        val replaced = com.example.ui.components.ResultEditHelpers.replaceTermInResult(
+            result = initial,
+            findText = "Kael",
+            replaceText = "Cael$",
+            ignoreCase = false,
+            wholeWord = true
+        )
+        assertTrue(replaced.narration.contains("Cael$ berjalan bersama Kaelis."))
+        assertEquals("Cael$", replaced.characterSheet[0].name)
+        assertEquals("Cael$ smiling anime", replaced.timeline[0].visualPrompt)
+        assertEquals("Cael$ muncul di layar.", replaced.segmentSummaries[0])
+
+        // Rename karakter dengan propagasi global
+        val renamed = com.example.ui.components.ResultEditHelpers.updateCharacter(
+            result = initial,
+            index = 0,
+            newName = "Kyle",
+            newDescription = "Pendekar pedang biru.",
+            propagateRenameGlobally = true
+        )
+        assertEquals("Kyle", renamed.characterSheet[0].name)
+        assertEquals("Pendekar pedang biru.", renamed.characterSheet[0].description)
+        assertEquals("Teman Kyle.", renamed.characterSheet[1].description)
+        assertTrue(renamed.narration.contains("Kyle berjalan bersama Kaelis. Kyle menoleh cepat."))
+        assertEquals("Aku Kyle!", renamed.timeline[0].dialogue)
+    }
+
+    @Test
+    fun testRecapPacingParseVideoDurationFallbacks() {
+        val fromFormatted = com.example.data.model.AnimeAnalysisResult(
+            narration = "Tes",
+            characterSheet = emptyList(),
+            timeline = emptyList(),
+            totalSegments = 4,
+            durationFormatted = "20:00",
+            intervalSeconds = 5
+        )
+        assertEquals(1200L, com.example.ui.components.RecapPacingAnalyzer.parseVideoDurationSeconds(fromFormatted))
+
+        val fromTimeline = com.example.data.model.AnimeAnalysisResult(
+            narration = "Tes",
+            characterSheet = emptyList(),
+            timeline = listOf(
+                TimelineItem(timestamp = "00:00 - 00:45", sceneDescription = "A", visualPrompt = ""),
+                TimelineItem(timestamp = "00:45 - 01:30", sceneDescription = "B", visualPrompt = "")
+            ),
+            totalSegments = 1,
+            durationFormatted = "",
+            intervalSeconds = 5
+        )
+        assertEquals(90L, com.example.ui.components.RecapPacingAnalyzer.parseVideoDurationSeconds(fromTimeline))
+
+        val fromSegments = com.example.data.model.AnimeAnalysisResult(
+            narration = "Tes",
+            characterSheet = emptyList(),
+            timeline = emptyList(),
+            totalSegments = 3,
+            durationFormatted = "tidak valid",
+            intervalSeconds = 5
+        )
+        assertEquals(540L, com.example.ui.components.RecapPacingAnalyzer.parseVideoDurationSeconds(fromSegments))
+    }
+
+    @Test
+    fun testRecapPacingOverallClassificationAndPresets() {
+        val analyzer = com.example.ui.components.RecapPacingAnalyzer
+
+        val emptyReport = analyzer.analyzeOverall(
+            script = "   ",
+            sourceVideoSeconds = 120L,
+            targetPreset = com.example.ui.components.PacingTargetPreset.FULL_VIDEO,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(com.example.ui.components.PacingStatus.EMPTY, emptyReport.status)
+        assertEquals(0, emptyReport.scriptWordCount)
+
+        // Target 60 detik (120 * 0.50), kecepatan Normal 145 wpm -> ~145 kata harus pas (BALANCED)
+        val balancedWords = (1..145).joinToString(" ") { "kata" }
+        val balancedReport = analyzer.analyzeOverall(
+            script = balancedWords,
+            sourceVideoSeconds = 120L,
+            targetPreset = com.example.ui.components.PacingTargetPreset.STANDARD_RECAP,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(60L, balancedReport.targetVideoSeconds)
+        assertEquals(com.example.ui.components.PacingStatus.BALANCED, balancedReport.status)
+
+        // Terlalu singkat: 10 kata untuk target 60 detik
+        val shortWords = (1..10).joinToString(" ") { "singkat" }
+        val shortReport = analyzer.analyzeOverall(
+            script = shortWords,
+            sourceVideoSeconds = 120L,
+            targetPreset = com.example.ui.components.PacingTargetPreset.STANDARD_RECAP,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(com.example.ui.components.PacingStatus.TOO_SHORT, shortReport.status)
+
+        // Terlalu padat: 260 kata untuk target 60 detik (~108 detik > 1.35 * 60)
+        val denseWords = (1..260).joinToString(" ") { "padat" }
+        val denseReport = analyzer.analyzeOverall(
+            script = denseWords,
+            sourceVideoSeconds = 120L,
+            targetPreset = com.example.ui.components.PacingTargetPreset.STANDARD_RECAP,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(com.example.ui.components.PacingStatus.TOO_DENSE, denseReport.status)
+        assertTrue(denseReport.deltaSeconds > 0L)
+    }
+
+    @Test
+    fun testRecapPacingBeatsAndDenseTimelineCues() {
+        val analyzer = com.example.ui.components.RecapPacingAnalyzer
+
+        val p1 = (1..36).joinToString(" ") { "awal" }
+        val p2 = (1..36).joinToString(" ") { "tengah" }
+        val p3 = (1..36).joinToString(" ") { "akhir" }
+        val beats = analyzer.analyzeBeats(
+            script = "$p1\n\n$p2\n\n$p3",
+            targetVideoSeconds = 45L,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(3, beats.size)
+        assertEquals(1, beats[0].index)
+        assertEquals(0L, beats[0].targetWindowStartSec)
+        assertEquals(15L, beats[0].targetWindowEndSec)
+        assertEquals(15L, beats[0].targetDurationSeconds)
+        assertEquals(com.example.ui.components.PacingStatus.BALANCED, beats[0].status)
+
+        val denseDialogue = (1..25).joinToString(" ") { "dialog" }
+        val result = com.example.data.model.AnimeAnalysisResult(
+            narration = "$p1\n\n$p2",
+            characterSheet = emptyList(),
+            timeline = listOf(
+                TimelineItem(
+                    timestamp = "00:00 - 00:03",
+                    sceneDescription = "Adegan cepat",
+                    visualPrompt = "",
+                    dialogue = denseDialogue
+                ),
+                TimelineItem(
+                    timestamp = "00:03 - 00:08",
+                    sceneDescription = "Adegan santai",
+                    visualPrompt = "",
+                    dialogue = "Halo."
+                )
+            ),
+            totalSegments = 1,
+            durationFormatted = "01:00",
+            intervalSeconds = 5
+        )
+        val report = analyzer.analyzeResult(
+            result = result,
+            sourceType = com.example.ui.components.TtsSourceType.NARRATION,
+            targetPreset = com.example.ui.components.PacingTargetPreset.STANDARD_RECAP,
+            pace = com.example.ui.components.TtsReadingPace.NORMAL
+        )
+        assertEquals(1, report.denseCues.size)
+        assertEquals(0, report.denseCues[0].timelineIndex)
+        assertEquals("00:00 - 00:03", report.denseCues[0].timestamp)
+        assertEquals(3L, report.denseCues[0].clipDurationSeconds)
+    }
 }
+
+
+
