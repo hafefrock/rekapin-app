@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +46,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -198,7 +202,6 @@ fun ResultView(
         }
     }
 
-    var selectedTab by remember { mutableIntStateOf(0) }
     val hasNarration = workingResult.narration.isNotBlank()
     val hasTtsContent = hasNarration || workingResult.timeline.isNotEmpty()
     val sourceVideoSeconds = remember(workingResult.durationFormatted, workingResult.timeline, workingResult.totalSegments) {
@@ -220,10 +223,12 @@ fun ResultView(
             )
         }
     }
-    val narasiTabLabel = when {
-        effectiveModeName.contains("Dialog", ignoreCase = true) -> "Dialog"
-        effectiveModeName.contains("Asli", ignoreCase = true) -> "Narasi Asli"
-        else -> "Narasi"
+    val narasiTabLabel = remember(effectiveModeName) {
+        when {
+            effectiveModeName.contains("Dialog", ignoreCase = true) -> "Dialog"
+            effectiveModeName.contains("Asli", ignoreCase = true) -> "Narasi Asli"
+            else -> "Narasi"
+        }
     }
     val tabs = remember(
         workingResult.characterSheet.size,
@@ -234,21 +239,84 @@ fun ResultView(
         effectiveBible
     ) {
         buildList {
-            add("Semua")
+            add("all" to "Semua")
             if (hasNarration) {
-                add(narasiTabLabel)
+                add("narration" to narasiTabLabel)
             }
-            add("Karakter (${workingResult.characterSheet.size})")
-            add("Timeline (${workingResult.timeline.size})")
+            add("characters" to "Karakter (${workingResult.characterSheet.size})")
+            add("timeline" to "Timeline (${workingResult.timeline.size})")
             if (workingResult.segmentSummaries.isNotEmpty()) {
-                add("Segmen (${workingResult.segmentSummaries.size})")
+                add("segments" to "Segmen (${workingResult.segmentSummaries.size})")
             }
             if (effectiveBible != null && !effectiveBible.isEmpty()) {
-                add("Memori Seri")
+                add("series_bible" to "Memori Seri")
             }
         }
     }
-    val safeSelectedTab = selectedTab.coerceIn(tabs.indices)
+
+    val onCopyAll = remember(workingResult, effectiveModeName, languageName, effectiveBible) {
+        {
+            val fullText = ExportFormatters.formatFullExport(workingResult, effectiveModeName, languageName, effectiveBible)
+            clipboard.setText(AnnotatedString(fullText))
+            notify("Tersalin")
+        }
+    }
+    val onExportTxt = remember(defaultFileName) {
+        {
+            try {
+                exportFileLauncher.launch(defaultFileName)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Tidak dapat membuka file picker: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val onCopyNarration = remember(workingResult.narration) {
+        {
+            clipboard.setText(AnnotatedString(workingResult.narration))
+            notify("Tersalin")
+        }
+    }
+    val onCopyCharacters = remember(workingResult.characterSheet) {
+        {
+            clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(workingResult.characterSheet)))
+            notify("Tersalin")
+        }
+    }
+    val onCopyTimeline = remember(workingResult.timeline, workingResult.intervalSeconds, workingResult.maxSceneDuration) {
+        {
+            clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(workingResult.timeline, workingResult.intervalSeconds, workingResult.maxSceneDuration)))
+            notify("Tersalin")
+        }
+    }
+    val onCopyAllVisualPrompts = remember(workingResult.timeline) {
+        {
+            clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(workingResult.timeline)))
+            notify("Tersalin")
+        }
+    }
+    val onCopyScenePrompt: (String) -> Unit = remember {
+        { prompt ->
+            clipboard.setText(AnnotatedString(prompt))
+            notify("Tersalin")
+        }
+    }
+    val onCopySegmentSummaries = remember(workingResult.segmentSummaries, workingResult.segmentModels) {
+        {
+            clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(workingResult.segmentSummaries, workingResult.segmentModels)))
+            notify("Tersalin")
+        }
+    }
+    val onCopySeriesBible = remember(effectiveBible) {
+        {
+            effectiveBible?.let {
+                clipboard.setText(AnnotatedString(ExportFormatters.formatSeriesBible(it)))
+                notify("Tersalin")
+            }
+            Unit
+        }
+    }
+    val onEditCharacter: (Int) -> Unit = remember { { idx -> editingCharacterIndex = idx } }
+    val onEditTimelineItem: (Int) -> Unit = remember { { idx -> editingTimelineIndex = idx } }
 
     if (showSrtDialog) {
         val srtContent = remember(workingResult.timeline, workingResult.intervalSeconds, workingResult.maxSceneDuration, selectedSrtMode) {
@@ -423,18 +491,8 @@ fun ResultView(
         Spacer(modifier = Modifier.height(RekapinSpacing.sm))
 
         ResultActionRow(
-            onCopyAll = {
-                val fullText = ExportFormatters.formatFullExport(workingResult, effectiveModeName, languageName, effectiveBible)
-                clipboard.setText(AnnotatedString(fullText))
-                notify("Tersalin")
-            },
-            onExportTxt = {
-                try {
-                    exportFileLauncher.launch(defaultFileName)
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Tidak dapat membuka file picker: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            },
+            onCopyAll = onCopyAll,
+            onExportTxt = onExportTxt,
             onExportSrt = { showSrtDialog = true },
             hasTimelineForSrt = workingResult.timeline.isNotEmpty(),
             onEditResult = {
@@ -454,111 +512,148 @@ fun ResultView(
 
         Spacer(modifier = Modifier.height(RekapinSpacing.sm))
 
-        ScrollableTabRow(
-            selectedTabIndex = safeSelectedTab,
-            containerColor = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.primary,
-            edgePadding = RekapinSpacing.md,
-            divider = {},
-            indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[safeSelectedTab]),
-                    color = MaterialTheme.colorScheme.primary,
-                    height = 2.dp
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            tabs.forEachIndexed { index, title ->
-                val isTabSelected = safeSelectedTab == index
-                Tab(
-                    selected = isTabSelected,
-                    onClick = { selectedTab = index },
-                    selectedContentColor = MaterialTheme.colorScheme.primary,
-                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    text = {
-                        Text(
-                            text = title,
-                            style = (if (isTabSelected) RekapinTypography.bodyBold else RekapinTypography.body)
-                                .copy(fontSize = 13.sp),
-                            maxLines = 1
-                        )
-                    },
-                    modifier = Modifier
-                        .height(40.dp)
-                        .testTag("tab_result_$index")
-                )
-            }
+        ResultTabsContainer(
+            tabs = tabs,
+            workingResult = workingResult,
+            styleName = styleName,
+            effectiveModeName = effectiveModeName,
+            effectiveBible = effectiveBible,
+            stageTimings = stageTimings,
+            pacingReport = pacingReport,
+            selectedPacingTarget = selectedPacingTarget,
+            onOpenPacingDetail = { showPacingDialog = true },
+            onCopyNarration = onCopyNarration,
+            onCopyCharacters = onCopyCharacters,
+            onCopyTimeline = onCopyTimeline,
+            onCopyAllVisualPrompts = onCopyAllVisualPrompts,
+            onCopyScenePrompt = onCopyScenePrompt,
+            onCopySegmentSummaries = onCopySegmentSummaries,
+            onCopySeriesBible = onCopySeriesBible,
+            onEditCharacter = onEditCharacter,
+            onEditTimelineItem = onEditTimelineItem
+        )
+    }
+}
+
+@Composable
+private fun ResultTabsContainer(
+    tabs: List<Pair<String, String>>,
+    workingResult: AnimeAnalysisResult,
+    styleName: String,
+    effectiveModeName: String,
+    effectiveBible: SeriesBible?,
+    stageTimings: Map<String, Long>?,
+    pacingReport: OverallPacingReport?,
+    selectedPacingTarget: PacingTargetPreset,
+    onOpenPacingDetail: () -> Unit,
+    onCopyNarration: () -> Unit,
+    onCopyCharacters: () -> Unit,
+    onCopyTimeline: () -> Unit,
+    onCopyAllVisualPrompts: () -> Unit,
+    onCopyScenePrompt: (String) -> Unit,
+    onCopySegmentSummaries: () -> Unit,
+    onCopySeriesBible: () -> Unit,
+    onEditCharacter: (Int) -> Unit,
+    onEditTimelineItem: (Int) -> Unit
+) {
+    var selectedTab by rememberSaveable(
+        workingResult.videoName,
+        workingResult.durationFormatted,
+        workingResult.totalSegments
+    ) {
+        mutableIntStateOf(0)
+    }
+    val safeSelectedTab = selectedTab.coerceIn(tabs.indices)
+    val tabStateHolder = rememberSaveableStateHolder()
+
+    ScrollableTabRow(
+        selectedTabIndex = safeSelectedTab,
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.primary,
+        edgePadding = RekapinSpacing.md,
+        divider = {},
+        indicator = { tabPositions ->
+            TabRowDefaults.SecondaryIndicator(
+                modifier = Modifier.tabIndicatorOffset(tabPositions[safeSelectedTab]),
+                color = MaterialTheme.colorScheme.primary,
+                height = 2.dp
+            )
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        tabs.forEachIndexed { index, (_, title) ->
+            val isTabSelected = safeSelectedTab == index
+            Tab(
+                selected = isTabSelected,
+                onClick = { selectedTab = index },
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = {
+                    Text(
+                        text = title,
+                        style = (if (isTabSelected) RekapinTypography.bodyBold else RekapinTypography.body)
+                            .copy(fontSize = 13.sp),
+                        maxLines = 1
+                    )
+                },
+                modifier = Modifier
+                    .height(40.dp)
+                    .testTag("tab_result_$index")
+            )
         }
+    }
 
-        Spacer(modifier = Modifier.height(RekapinSpacing.sm))
+    Spacer(modifier = Modifier.height(RekapinSpacing.sm))
 
-        val currentTabTitle = tabs[safeSelectedTab]
+    val currentTabKey = tabs[safeSelectedTab].first
 
-        when {
-            currentTabTitle == narasiTabLabel -> NarrationSection(
+    tabStateHolder.SaveableStateProvider(key = currentTabKey) {
+        val listState = rememberLazyListState()
+        when (currentTabKey) {
+            "narration" -> NarrationSection(
                 narration = workingResult.narration,
                 modeName = effectiveModeName,
-                onCopyNarration = {
-                    clipboard.setText(AnnotatedString(workingResult.narration))
-                    notify("Tersalin")
-                },
+                onCopyNarration = onCopyNarration,
                 pacingReport = pacingReport,
                 pacingTargetPreset = selectedPacingTarget,
-                onOpenPacingDetail = { showPacingDialog = true }
+                onOpenPacingDetail = onOpenPacingDetail,
+                listState = listState
             )
-            currentTabTitle.startsWith("Karakter (") -> CharacterSheetSection(
+            "characters" -> CharacterSheetSection(
                 characters = workingResult.characterSheet,
-                onCopyCharacters = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(workingResult.characterSheet)))
-                    notify("Tersalin")
-                },
-                onEditCharacter = { idx -> editingCharacterIndex = idx }
+                onCopyCharacters = onCopyCharacters,
+                onEditCharacter = onEditCharacter,
+                listState = listState
             )
-            currentTabTitle.startsWith("Timeline (") -> TimelineSection(
+            "timeline" -> TimelineSection(
                 timeline = workingResult.timeline,
                 intervalSeconds = workingResult.intervalSeconds,
                 maxSceneDuration = workingResult.maxSceneDuration,
                 styleName = styleName,
-                onCopyTimeline = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(workingResult.timeline, workingResult.intervalSeconds, workingResult.maxSceneDuration)))
-                    notify("Tersalin")
-                },
-                onCopyAllVisualPrompts = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(workingResult.timeline)))
-                    notify("Tersalin")
-                },
-                onCopyScenePrompt = { prompt ->
-                    clipboard.setText(AnnotatedString(prompt))
-                    notify("Tersalin")
-                },
-                onEditTimelineItem = { idx -> editingTimelineIndex = idx }
+                onCopyTimeline = onCopyTimeline,
+                onCopyAllVisualPrompts = onCopyAllVisualPrompts,
+                onCopyScenePrompt = onCopyScenePrompt,
+                onEditTimelineItem = onEditTimelineItem,
+                listState = listState
             )
-            currentTabTitle.startsWith("Segmen (") -> SegmentSummariesSection(
+            "segments" -> SegmentSummariesSection(
                 summaries = workingResult.segmentSummaries,
                 models = workingResult.segmentModels,
-                onCopyAll = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(workingResult.segmentSummaries, workingResult.segmentModels)))
-                    notify("Tersalin")
-                },
-                onCopySegment = { summary ->
-                    clipboard.setText(AnnotatedString(summary))
-                    notify("Tersalin")
-                }
+                onCopyAll = onCopySegmentSummaries,
+                onCopySegment = onCopyScenePrompt,
+                listState = listState
             )
-            currentTabTitle == "Memori Seri" -> effectiveBible?.let { bible ->
-                androidx.compose.foundation.lazy.LazyColumn(
+            "series_bible" -> effectiveBible?.let { bible ->
+                LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
                     contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    item {
+                    item(key = "series_bible_tab", contentType = "series_bible") {
                         SeriesBibleSection(
                             bible = bible,
-                            onCopy = {
-                                clipboard.setText(AnnotatedString(ExportFormatters.formatSeriesBible(bible)))
-                                notify("Tersalin")
-                            },
+                            onCopy = onCopySeriesBible,
                             defaultExpanded = true
                         )
                     }
@@ -575,38 +670,16 @@ fun ResultView(
                 narrationModeName = effectiveModeName,
                 seriesBible = effectiveBible,
                 stageTimings = stageTimings,
-                onCopyNarration = {
-                    clipboard.setText(AnnotatedString(workingResult.narration))
-                    notify("Tersalin")
-                },
-                onCopyCharacters = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatCharacterSheet(workingResult.characterSheet)))
-                    notify("Tersalin")
-                },
-                onCopyTimeline = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatTimeline(workingResult.timeline, workingResult.intervalSeconds, workingResult.maxSceneDuration)))
-                    notify("Tersalin")
-                },
-                onCopyAllVisualPrompts = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatAllVisualPromptsOnly(workingResult.timeline)))
-                    notify("Tersalin")
-                },
-                onCopyScenePrompt = { prompt ->
-                    clipboard.setText(AnnotatedString(prompt))
-                    notify("Tersalin")
-                },
-                onCopySegmentSummaries = {
-                    clipboard.setText(AnnotatedString(ExportFormatters.formatSegmentSummaries(workingResult.segmentSummaries, workingResult.segmentModels)))
-                    notify("Tersalin")
-                },
-                onCopySeriesBible = {
-                    effectiveBible?.let {
-                        clipboard.setText(AnnotatedString(ExportFormatters.formatSeriesBible(it)))
-                        notify("Tersalin")
-                    }
-                },
-                onEditCharacter = { idx -> editingCharacterIndex = idx },
-                onEditTimelineItem = { idx -> editingTimelineIndex = idx }
+                onCopyNarration = onCopyNarration,
+                onCopyCharacters = onCopyCharacters,
+                onCopyTimeline = onCopyTimeline,
+                onCopyAllVisualPrompts = onCopyAllVisualPrompts,
+                onCopyScenePrompt = onCopyScenePrompt,
+                onCopySegmentSummaries = onCopySegmentSummaries,
+                onCopySeriesBible = onCopySeriesBible,
+                onEditCharacter = onEditCharacter,
+                onEditTimelineItem = onEditTimelineItem,
+                listState = listState
             )
         }
     }

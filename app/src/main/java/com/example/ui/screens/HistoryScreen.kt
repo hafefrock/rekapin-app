@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -102,88 +103,29 @@ fun HistoryScreen(
     // Mode pilih banyak
     var isSelectMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
-    var showMergeDialog by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf(HistoryFilter.ALL) }
-
-    val filteredAnalyses = remember(analyses, selectedFilter) {
-        when (selectedFilter) {
-            HistoryFilter.ALL -> analyses
-            HistoryFilter.COMPLETED -> analyses.filter { it.isCompleted }
-            HistoryFilter.INCOMPLETE -> analyses.filter { !it.isCompleted }
-        }
-    }
-
-    BackHandler {
-        if (isSelectMode) {
-            isSelectMode = false
-            selectedIds = emptySet()
-        } else {
-            onBack()
-        }
-    }
-    var itemToDelete by remember { mutableStateOf<AnimeAnalysisEntity?>(null) }
+    var showMergeDialogStandalone by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = RekapinSpacing.xs, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (isSelectMode) {
-                                isSelectMode = false
-                                selectedIds = emptySet()
-                            } else {
-                                onBack()
-                            }
-                        },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("btn_back_history")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Kembali",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(RekapinSpacing.xs))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isSelectMode) "Pilih Riwayat" else "Riwayat",
-                            style = RekapinTypography.sectionTitle.copy(
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                lineHeight = 22.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = if (isSelectMode) "${selectedIds.size} dipilih" else "${analyses.size} analisis",
-                            style = RekapinTypography.caption.copy(fontSize = 11.sp, lineHeight = 14.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            HistoryTopBar(
+                isSelectMode = isSelectMode,
+                selectedCount = selectedIds.size,
+                totalCount = analyses.size,
+                onBackClick = {
+                    if (isSelectMode) {
+                        isSelectMode = false
+                        selectedIds = emptySet()
+                    } else {
+                        onBack()
                     }
                 }
-            }
+            )
         },
         bottomBar = {
             if (isSelectMode) {
                 HistorySelectBottomBar(
                     selectedCount = selectedIds.size,
-                    onMergeExport = { showMergeDialog = true },
+                    onMergeExport = { showMergeDialogStandalone = true },
                     onCancel = {
                         isSelectMode = false
                         selectedIds = emptySet()
@@ -195,165 +137,285 @@ fun HistoryScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(
+        HistoryBody(
+            analyses = analyses,
+            isSelectMode = isSelectMode,
+            selectedIds = selectedIds,
+            onEnterSelectMode = { initialId ->
+                isSelectMode = true
+                selectedIds = selectedIds + initialId
+            },
+            onToggleSelectId = { id ->
+                selectedIds = if (selectedIds.contains(id)) selectedIds - id else selectedIds + id
+            },
+            onExitSelectMode = {
+                isSelectMode = false
+                selectedIds = emptySet()
+            },
+            showMergeDialog = showMergeDialogStandalone,
+            onDismissMergeDialog = { showMergeDialogStandalone = false },
+            onBack = onBack,
+            onSelectAnalysis = onSelectAnalysis,
+            onDeleteAnalysis = onDeleteAnalysis,
+            onResumeAnalysis = onResumeAnalysis,
+            onMergeNarrationsWithAi = onMergeNarrationsWithAi,
+            getMaxDurationForAnalysis = getMaxDurationForAnalysis,
+            failedSeriesBibleBuildIds = failedSeriesBibleBuildIds,
+            seriesBibleBuildInProgressId = seriesBibleBuildInProgressId,
+            onBuildSeriesBibleNow = onBuildSeriesBibleNow,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+        )
+    }
+}
+
+@Composable
+internal fun HistoryTopBar(
+    isSelectMode: Boolean,
+    selectedCount: Int,
+    totalCount: Int,
+    onBackClick: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = RekapinSpacing.xs, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (analyses.isEmpty()) {
-                HistoryEmptyState(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(RekapinSpacing.lg)
+            IconButton(
+                onClick = onBackClick,
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("btn_back_history")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Kembali",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
                 )
-            } else {
-                ChoiceChips(
-                    items = HistoryFilter.entries,
-                    selectedItem = selectedFilter,
-                    onItemSelected = { selectedFilter = it },
-                    labelProvider = { it.label },
-                    compact = true,
-                    modifier = Modifier.padding(
-                        horizontal = RekapinSpacing.md,
-                        vertical = 6.dp
-                    )
+            }
+            Spacer(modifier = Modifier.width(RekapinSpacing.xs))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isSelectMode) "Pilih Riwayat" else "Riwayat",
+                    style = RekapinTypography.sectionTitle.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 22.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-
-                if (filteredAnalyses.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(RekapinSpacing.lg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Tidak ada analisis di filter ini",
-                            style = RekapinTypography.caption,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = RekapinSpacing.md,
-                            end = RekapinSpacing.md,
-                            top = RekapinSpacing.xs,
-                            bottom = RekapinSpacing.xl
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
-                    ) {
-                        items(
-                            items = filteredAnalyses,
-                            key = { it.id },
-                            contentType = { "history_item" }
-                        ) { entity ->
-                            val isSelected = selectedIds.contains(entity.id)
-                            val cachedMaxDuration = remember(entity.id, entity.updatedAt) {
-                                getMaxDurationForAnalysis?.invoke(entity.id) ?: 5
-                            }
-                            HistoryItemCard(
-                                entity = entity,
-                                isSelectMode = isSelectMode,
-                                isSelected = isSelected,
-                                onLongClick = {
-                                    if (entity.isCompleted) {
-                                        isSelectMode = true
-                                        selectedIds = selectedIds + entity.id
-                                    }
-                                },
-                                onClick = {
-                                    if (isSelectMode) {
-                                        if (entity.isCompleted) {
-                                            selectedIds = if (isSelected) {
-                                                selectedIds - entity.id
-                                            } else {
-                                                selectedIds + entity.id
-                                            }
-                                        }
-                                    } else {
-                                        onSelectAnalysis(entity)
-                                    }
-                                },
-                                onDelete = { itemToDelete = entity },
-                                onResume = { onResumeAnalysis(entity.id) },
-                                maxSceneDuration = cachedMaxDuration,
-                                seriesBibleBuildFailed = failedSeriesBibleBuildIds.contains(entity.id),
-                                isBuildingSeriesBible = seriesBibleBuildInProgressId == entity.id,
-                                onBuildSeriesBibleNow = { onBuildSeriesBibleNow?.invoke(entity.id) }
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = if (isSelectMode) "$selectedCount dipilih" else "$totalCount analisis",
+                    style = RekapinTypography.caption.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        }
-
-        // Dialog Gabung & Ekspor
-        if (showMergeDialog) {
-            val selectedEntities = remember(analyses, selectedIds) {
-                analyses.filter { selectedIds.contains(it.id) }
-            }
-            MergeExportDialog(
-                selectedAnalyses = selectedEntities,
-                onDismiss = { showMergeDialog = false },
-                onMergeNarrationsWithAi = { parts, onStatus ->
-                    onMergeNarrationsWithAi?.invoke(parts, onStatus)
-                        ?: throw IllegalStateException("Penyatuan narasi AI tidak tersedia")
-                }
-            )
-        }
-
-        // Dialog Konfirmasi Hapus
-        itemToDelete?.let { target ->
-            AlertDialog(
-                onDismissRequest = { itemToDelete = null },
-                shape = RoundedCornerShape(RekapinRadii.lg),
-                containerColor = MaterialTheme.colorScheme.surface,
-                title = {
-                    Text(
-                        text = "Hapus Riwayat Analisis",
-                        style = RekapinTypography.sectionTitle,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                },
-                text = {
-                    Text(
-                        text = "Apakah Anda yakin ingin menghapus hasil analisis video \"${target.videoName}\"? Data yang dihapus tidak dapat dipulihkan.",
-                        style = RekapinTypography.body,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            onDeleteAnalysis(target.id)
-                            itemToDelete = null
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(RekapinRadii.sm)
-                    ) {
-                        Text("Hapus", style = RekapinTypography.bodyBold)
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(
-                        onClick = { itemToDelete = null },
-                        shape = RoundedCornerShape(RekapinRadii.sm)
-                    ) {
-                        Text("Batal", style = RekapinTypography.bodyMedium)
-                    }
-                }
-            )
         }
     }
 }
 
 @Composable
-private fun HistorySelectBottomBar(
+internal fun HistoryBody(
+    analyses: List<AnimeAnalysisEntity>,
+    isSelectMode: Boolean,
+    selectedIds: Set<Long>,
+    onEnterSelectMode: (Long) -> Unit,
+    onToggleSelectId: (Long) -> Unit,
+    onExitSelectMode: () -> Unit,
+    showMergeDialog: Boolean,
+    onDismissMergeDialog: () -> Unit,
+    onBack: () -> Unit,
+    onSelectAnalysis: (AnimeAnalysisEntity) -> Unit,
+    onDeleteAnalysis: (Long) -> Unit,
+    onResumeAnalysis: (Long) -> Unit,
+    onMergeNarrationsWithAi: (suspend (parts: List<Pair<String, String>>, onStatus: (String) -> Unit) -> String)? = null,
+    getMaxDurationForAnalysis: ((Long) -> Int)? = null,
+    failedSeriesBibleBuildIds: Set<Long> = emptySet(),
+    seriesBibleBuildInProgressId: Long? = null,
+    onBuildSeriesBibleNow: ((Long) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var selectedFilter by remember { mutableStateOf(HistoryFilter.ALL) }
+    var itemToDelete by remember { mutableStateOf<AnimeAnalysisEntity?>(null) }
+    val listState = rememberLazyListState()
+
+    val filteredAnalyses = remember(analyses, selectedFilter) {
+        when (selectedFilter) {
+            HistoryFilter.ALL -> analyses
+            HistoryFilter.COMPLETED -> analyses.filter { it.isCompleted }
+            HistoryFilter.INCOMPLETE -> analyses.filter { !it.isCompleted }
+        }
+    }
+
+    BackHandler {
+        if (isSelectMode) {
+            onExitSelectMode()
+        } else {
+            onBack()
+        }
+    }
+
+    Column(modifier = modifier) {
+        if (analyses.isEmpty()) {
+            HistoryEmptyState(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(RekapinSpacing.lg)
+            )
+        } else {
+            ChoiceChips(
+                items = HistoryFilter.entries,
+                selectedItem = selectedFilter,
+                onItemSelected = { selectedFilter = it },
+                labelProvider = { it.label },
+                compact = true,
+                modifier = Modifier.padding(
+                    horizontal = RekapinSpacing.md,
+                    vertical = 6.dp
+                )
+            )
+
+            if (filteredAnalyses.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(RekapinSpacing.lg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Tidak ada analisis di filter ini",
+                        style = RekapinTypography.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = RekapinSpacing.md,
+                        end = RekapinSpacing.md,
+                        top = RekapinSpacing.xs,
+                        bottom = RekapinSpacing.xl
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm)
+                ) {
+                    items(
+                        items = filteredAnalyses,
+                        key = { it.id },
+                        contentType = { "history_item" }
+                    ) { entity ->
+                        val isSelected = selectedIds.contains(entity.id)
+                        val cachedMaxDuration = remember(entity.id, entity.updatedAt) {
+                            getMaxDurationForAnalysis?.invoke(entity.id) ?: 5
+                        }
+                        HistoryItemCard(
+                            entity = entity,
+                            isSelectMode = isSelectMode,
+                            isSelected = isSelected,
+                            onLongClick = {
+                                if (entity.isCompleted) {
+                                    onEnterSelectMode(entity.id)
+                                }
+                            },
+                            onClick = {
+                                if (isSelectMode) {
+                                    if (entity.isCompleted) {
+                                        onToggleSelectId(entity.id)
+                                    }
+                                } else {
+                                    onSelectAnalysis(entity)
+                                }
+                            },
+                            onDelete = { itemToDelete = entity },
+                            onResume = { onResumeAnalysis(entity.id) },
+                            maxSceneDuration = cachedMaxDuration,
+                            seriesBibleBuildFailed = failedSeriesBibleBuildIds.contains(entity.id),
+                            isBuildingSeriesBible = seriesBibleBuildInProgressId == entity.id,
+                            onBuildSeriesBibleNow = { onBuildSeriesBibleNow?.invoke(entity.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Dialog Gabung & Ekspor
+    if (showMergeDialog) {
+        val selectedEntities = remember(analyses, selectedIds) {
+            analyses.filter { selectedIds.contains(it.id) }
+        }
+        MergeExportDialog(
+            selectedAnalyses = selectedEntities,
+            onDismiss = onDismissMergeDialog,
+            onMergeNarrationsWithAi = { parts, onStatus ->
+                onMergeNarrationsWithAi?.invoke(parts, onStatus)
+                    ?: throw IllegalStateException("Penyatuan narasi AI tidak tersedia")
+            }
+        )
+    }
+
+    // Dialog Konfirmasi Hapus
+    itemToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { itemToDelete = null },
+            shape = RoundedCornerShape(RekapinRadii.lg),
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = {
+                Text(
+                    text = "Hapus Riwayat Analisis",
+                    style = RekapinTypography.sectionTitle,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "Apakah Anda yakin ingin menghapus hasil analisis video \"${target.videoName}\"? Data yang dihapus tidak dapat dipulihkan.",
+                    style = RekapinTypography.body,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteAnalysis(target.id)
+                        itemToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(RekapinRadii.sm)
+                ) {
+                    Text("Hapus", style = RekapinTypography.bodyBold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { itemToDelete = null },
+                    shape = RoundedCornerShape(RekapinRadii.sm)
+                ) {
+                    Text("Batal", style = RekapinTypography.bodyMedium)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun HistorySelectBottomBar(
     selectedCount: Int,
     onMergeExport: () -> Unit,
     onCancel: () -> Unit

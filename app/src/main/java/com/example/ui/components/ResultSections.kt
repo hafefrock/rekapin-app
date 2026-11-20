@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -57,11 +59,13 @@ internal fun AllResultsSection(
     onCopySegmentSummaries: () -> Unit,
     onCopySeriesBible: () -> Unit = {},
     onEditCharacter: ((Int) -> Unit)? = null,
-    onEditTimelineItem: ((Int) -> Unit)? = null
+    onEditTimelineItem: ((Int) -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState()
 ) {
     val narrationTitle = narrationHeaderTitle(narrationModeName)
 
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
@@ -473,16 +477,18 @@ internal fun NarrationSection(
     onCopyNarration: () -> Unit,
     pacingReport: OverallPacingReport? = null,
     pacingTargetPreset: PacingTargetPreset = PacingTargetPreset.DEFAULT,
-    onOpenPacingDetail: (() -> Unit)? = null
+    onOpenPacingDetail: (() -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState()
 ) {
     val title = narrationHeaderTitle(modeName)
 
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
     ) {
-        item {
+        item(key = "narration_tab_card", contentType = "narration_card") {
             SectionHeader(
                 title = title,
                 titleStyle = RekapinTypography.bodyBold,
@@ -501,7 +507,7 @@ internal fun NarrationSection(
         }
 
         if (pacingReport != null && onOpenPacingDetail != null) {
-            item {
+            item(key = "narration_tab_pacing", contentType = "pacing_banner") {
                 PacingCompactBanner(
                     report = pacingReport,
                     targetPreset = pacingTargetPreset,
@@ -516,14 +522,16 @@ internal fun NarrationSection(
 internal fun CharacterSheetSection(
     characters: List<CharacterInfo>,
     onCopyCharacters: () -> Unit,
-    onEditCharacter: ((Int) -> Unit)? = null
+    onEditCharacter: ((Int) -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState()
 ) {
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
     ) {
-        item {
+        item(key = "header_characters_tab", contentType = "section_header") {
             SectionHeader(
                 title = "Karakter (${characters.size})",
                 titleStyle = RekapinTypography.bodyBold,
@@ -537,7 +545,7 @@ internal fun CharacterSheetSection(
         }
 
         if (characters.isEmpty()) {
-            item {
+            item(key = "empty_characters_tab", contentType = "empty_hint") {
                 Text(
                     text = "Belum ada karakter yang terdaftar pada segmen ini.",
                     style = RekapinTypography.caption,
@@ -570,9 +578,11 @@ internal fun TimelineSection(
     onCopyTimeline: () -> Unit,
     onCopyAllVisualPrompts: () -> Unit,
     onCopyScenePrompt: (String) -> Unit,
-    onEditTimelineItem: ((Int) -> Unit)? = null
+    onEditTimelineItem: ((Int) -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState()
 ) {
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()
@@ -623,9 +633,11 @@ internal fun SegmentSummariesSection(
     summaries: List<String>,
     models: List<String>,
     onCopyAll: () -> Unit,
-    onCopySegment: (String) -> Unit
+    onCopySegment: (String) -> Unit,
+    listState: LazyListState = rememberLazyListState()
 ) {
     LazyColumn(
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(RekapinSpacing.sm),
         contentPadding = PaddingValues(bottom = RekapinSpacing.lg),
         modifier = Modifier.fillMaxWidth()

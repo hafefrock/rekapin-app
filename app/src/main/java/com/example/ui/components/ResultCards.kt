@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -550,11 +551,30 @@ internal fun NarrationCard(
                 }
             }
 
-            Text(
-                text = narration,
-                style = RekapinTypography.body.copy(fontSize = 14.sp, lineHeight = 20.sp),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            val paragraphs = remember(narration) {
+                if (narration.length > 1000) {
+                    narration.split(Regex("\\n\\s*\\n")).filter { it.isNotBlank() }
+                } else {
+                    emptyList()
+                }
+            }
+            if (paragraphs.size > 1) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    paragraphs.forEach { paragraph ->
+                        Text(
+                            text = paragraph.trim(),
+                            style = RekapinTypography.body.copy(fontSize = 14.sp, lineHeight = 20.sp),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = narration,
+                    style = RekapinTypography.body.copy(fontSize = 14.sp, lineHeight = 20.sp),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
     }
 }

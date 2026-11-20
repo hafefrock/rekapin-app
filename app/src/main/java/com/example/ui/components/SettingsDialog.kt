@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,6 +111,7 @@ fun SettingsDialog(
     onSelectThinkingLevel: ((ThinkingLevelMode) -> Unit)? = null
 ) {
     var selectedCategory by rememberSaveable { mutableStateOf<Int?>(null) }
+    val pageStateHolder = rememberSaveableStateHolder()
 
     val handleBack: () -> Unit = {
         if (selectedCategory != null) {
@@ -209,74 +211,76 @@ fun SettingsDialog(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
                     )
 
-                    when (selectedCategory) {
-                        null -> SettingsCategoryOverview(
-                            apiKeys = apiKeys,
-                            activeKeyName = activeKeyName,
-                            isKeyDecryptFailed = isKeyDecryptFailed,
-                            selectedModel = selectedModel,
-                            isAutoSwitchModel = isAutoSwitchModel,
-                            selectedLanguage = selectedLanguage,
-                            selectedNarrationMode = selectedNarrationMode,
-                            visualStyles = visualStyles,
-                            selectedStyle = selectedStyle,
-                            isAutoBuildSeriesBible = isAutoBuildSeriesBible,
-                            isPrependRecapNarration = isPrependRecapNarration,
-                            isAutoSkipOpEd = isAutoSkipOpEd,
-                            isDetectRepeatedScenes = isDetectRepeatedScenes,
-                            onSelectCategory = { selectedCategory = it }
-                        )
-                        0 -> SettingsApiKeyPage(
-                            apiKeys = apiKeys,
-                            isKeyDecryptFailed = isKeyDecryptFailed,
-                            onAddKey = onAddKey,
-                            onRenameKey = onRenameKey,
-                            onDeleteKey = onDeleteKey,
-                            onSetActiveKey = onSetActiveKey,
-                            onTestKey = onTestKey,
-                            onTestKeyWithProgress = onTestKeyWithProgress
-                        )
-                        1 -> SettingsModelPage(
-                            models = models,
-                            selectedModel = selectedModel,
-                            isAutoSwitchModel = isAutoSwitchModel,
-                            onToggleAutoSwitch = onToggleAutoSwitch,
-                            selectedPacingMode = selectedPacingMode,
-                            onSelectPacingMode = onSelectPacingMode,
-                            selectedThinkingLevel = selectedThinkingLevel,
-                            onSelectThinkingLevel = onSelectThinkingLevel,
-                            onAddModel = onAddModel,
-                            onDeleteModel = onDeleteModel,
-                            onMoveModel = onMoveModel,
-                            onSelectModel = onSelectModel,
-                            modelUsageStorage = modelUsageStorage,
-                            onSetModelLimit = onSetModelLimit,
-                            onSetModelUsage = onSetModelUsage
-                        )
-                        2 -> SettingsLanguageAndModePage(
-                            selectedLanguage = selectedLanguage,
-                            selectedNarrationMode = selectedNarrationMode,
-                            onSelectLanguage = onSelectLanguage,
-                            onSelectNarrationMode = onSelectNarrationMode
-                        )
-                        3 -> SettingsVisualStylesPage(
-                            visualStyles = visualStyles,
-                            selectedStyle = selectedStyle,
-                            onSelectStyle = onSelectStyle,
-                            onAddCustomStyle = onAddCustomStyle,
-                            onUpdateCustomStyle = onUpdateCustomStyle,
-                            onDeleteCustomStyle = onDeleteCustomStyle
-                        )
-                        4 -> SettingsSeriesAutomationPage(
-                            isAutoBuildSeriesBible = isAutoBuildSeriesBible,
-                            onToggleAutoBuildSeriesBible = onToggleAutoBuildSeriesBible,
-                            isPrependRecapNarration = isPrependRecapNarration,
-                            onTogglePrependRecapNarration = onTogglePrependRecapNarration,
-                            isAutoSkipOpEd = isAutoSkipOpEd,
-                            onToggleAutoSkipOpEd = onToggleAutoSkipOpEd,
-                            isDetectRepeatedScenes = isDetectRepeatedScenes,
-                            onToggleDetectRepeatedScenes = onToggleDetectRepeatedScenes
-                        )
+                    pageStateHolder.SaveableStateProvider(key = selectedCategory ?: -1) {
+                        when (selectedCategory) {
+                            null -> SettingsCategoryOverview(
+                                apiKeys = apiKeys,
+                                activeKeyName = activeKeyName,
+                                isKeyDecryptFailed = isKeyDecryptFailed,
+                                selectedModel = selectedModel,
+                                isAutoSwitchModel = isAutoSwitchModel,
+                                selectedLanguage = selectedLanguage,
+                                selectedNarrationMode = selectedNarrationMode,
+                                visualStyles = visualStyles,
+                                selectedStyle = selectedStyle,
+                                isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+                                isPrependRecapNarration = isPrependRecapNarration,
+                                isAutoSkipOpEd = isAutoSkipOpEd,
+                                isDetectRepeatedScenes = isDetectRepeatedScenes,
+                                onSelectCategory = { selectedCategory = it }
+                            )
+                            0 -> SettingsApiKeyPage(
+                                apiKeys = apiKeys,
+                                isKeyDecryptFailed = isKeyDecryptFailed,
+                                onAddKey = onAddKey,
+                                onRenameKey = onRenameKey,
+                                onDeleteKey = onDeleteKey,
+                                onSetActiveKey = onSetActiveKey,
+                                onTestKey = onTestKey,
+                                onTestKeyWithProgress = onTestKeyWithProgress
+                            )
+                            1 -> SettingsModelPage(
+                                models = models,
+                                selectedModel = selectedModel,
+                                isAutoSwitchModel = isAutoSwitchModel,
+                                onToggleAutoSwitch = onToggleAutoSwitch,
+                                selectedPacingMode = selectedPacingMode,
+                                onSelectPacingMode = onSelectPacingMode,
+                                selectedThinkingLevel = selectedThinkingLevel,
+                                onSelectThinkingLevel = onSelectThinkingLevel,
+                                onAddModel = onAddModel,
+                                onDeleteModel = onDeleteModel,
+                                onMoveModel = onMoveModel,
+                                onSelectModel = onSelectModel,
+                                modelUsageStorage = modelUsageStorage,
+                                onSetModelLimit = onSetModelLimit,
+                                onSetModelUsage = onSetModelUsage
+                            )
+                            2 -> SettingsLanguageAndModePage(
+                                selectedLanguage = selectedLanguage,
+                                selectedNarrationMode = selectedNarrationMode,
+                                onSelectLanguage = onSelectLanguage,
+                                onSelectNarrationMode = onSelectNarrationMode
+                            )
+                            3 -> SettingsVisualStylesPage(
+                                visualStyles = visualStyles,
+                                selectedStyle = selectedStyle,
+                                onSelectStyle = onSelectStyle,
+                                onAddCustomStyle = onAddCustomStyle,
+                                onUpdateCustomStyle = onUpdateCustomStyle,
+                                onDeleteCustomStyle = onDeleteCustomStyle
+                            )
+                            4 -> SettingsSeriesAutomationPage(
+                                isAutoBuildSeriesBible = isAutoBuildSeriesBible,
+                                onToggleAutoBuildSeriesBible = onToggleAutoBuildSeriesBible,
+                                isPrependRecapNarration = isPrependRecapNarration,
+                                onTogglePrependRecapNarration = onTogglePrependRecapNarration,
+                                isAutoSkipOpEd = isAutoSkipOpEd,
+                                onToggleAutoSkipOpEd = onToggleAutoSkipOpEd,
+                                isDetectRepeatedScenes = isDetectRepeatedScenes,
+                                onToggleDetectRepeatedScenes = onToggleDetectRepeatedScenes
+                            )
+                        }
                     }
                 }
             }

@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,6 +80,7 @@ internal fun SettingsModelPage(
     var showAddModelDialog by remember { mutableStateOf(false) }
     var modelToDelete by remember { mutableStateOf<String?>(null) }
     var modelToEditQuota by remember { mutableStateOf<String?>(null) }
+    var quotaRefreshTick by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -322,7 +324,9 @@ internal fun SettingsModelPage(
                                 }
 
                                 if (modelUsageStorage != null) {
-                                    val usageInfo = modelUsageStorage.getUsageInfo(model)
+                                    val usageInfo = remember(model, quotaRefreshTick) {
+                                        modelUsageStorage.getUsageInfo(model)
+                                    }
                                     val progress = if (usageInfo.limit > 0) {
                                         (usageInfo.used.toFloat() / usageInfo.limit.toFloat()).coerceIn(0f, 1f)
                                     } else {
@@ -474,6 +478,7 @@ internal fun SettingsModelPage(
                 onConfirm = { newUsage, newLimit ->
                     onSetModelUsage?.invoke(modelName, newUsage)
                     onSetModelLimit?.invoke(modelName, newLimit)
+                    quotaRefreshTick++
                     modelToEditQuota = null
                 }
             )

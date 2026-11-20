@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,10 +105,24 @@ fun HomeScreen(
     val historyList by viewModel.historyList.collectAsStateWithLifecycle()
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsStateWithLifecycle()
     val viewingHistoryItem by viewModel.viewingHistoryItem.collectAsStateWithLifecycle()
+    val tabStateHolder = rememberSaveableStateHolder()
+
+    var isHistorySelectMode by remember { mutableStateOf(false) }
+    var selectedHistoryIds by remember { mutableStateOf(setOf<Long>()) }
+    var showHistoryMergeDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    LaunchedEffect(isHistoryOpen) {
-        if (isHistoryOpen) selectedDestination = 1
+    LaunchedEffect(isHistoryOpen, isSettingsOpen) {
+        selectedDestination = when {
+            isSettingsOpen -> 2
+            isHistoryOpen -> 1
+            else -> 0
+        }
+        if (!isHistoryOpen) {
+            isHistorySelectMode = false
+            selectedHistoryIds = emptySet()
+            showHistoryMergeDialog = false
+        }
     }
 
     val onSelectPrimaryDestination: (Int) -> Unit = { destination ->
@@ -117,9 +132,11 @@ fun HomeScreen(
                 viewModel.closeHistory()
                 if (isSettingsOpen) viewModel.closeSettings()
             }
-            1 -> viewModel.openHistory()
+            1 -> {
+                if (isSettingsOpen) viewModel.closeSettings()
+                viewModel.openHistory()
+            }
             2 -> {
-                viewModel.closeHistory()
                 viewModel.openSettings()
             }
         }
@@ -208,110 +225,99 @@ fun HomeScreen(
         return
     }
 
-    // Tampilkan Layar Riwayat jika sedang dibuka
-    if (isHistoryOpen) {
-        HistoryScreen(
-            analyses = historyList,
-            onBack = {
-                viewModel.closeHistory()
-                selectedDestination = 0
-            },
-            onSelectAnalysis = { viewModel.openHistoryDetail(it) },
-            onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
-            onResumeAnalysis = { resumeId ->
-                requestNotificationAndStart {
-                    viewModel.startAnalysis(resumeId)
-                }
-                viewModel.closeHistory()
-                selectedDestination = 0
-            },
-            getMaxDurationForAnalysis = { viewModel.getMaxDurationForAnalysis(it) },
-            failedSeriesBibleBuildIds = failedSeriesBibleBuildIds,
-            seriesBibleBuildInProgressId = seriesBibleBuildInProgressId,
-            onBuildSeriesBibleNow = { viewModel.buildSeriesBibleNow(it) },
-            onFinishWithoutCurrentSegment = { resumeId ->
-                viewModel.finishWithoutCurrentSegment(resumeId)
-                viewModel.closeHistory()
-                selectedDestination = 0
-            },
-            onMergeNarrationsWithAi = { parts, onStatus ->
-                viewModel.mergeNarrationsWithAi(parts, onStatus)
-            },
-            bottomNavigationContent = {
-                RekapinBottomNavigation(
-                    selectedDestination = selectedDestination,
-                    historyCount = historyList.size,
-                    onSelect = onSelectPrimaryDestination
-                )
+    // Tangani tombol Back sistem Android saat di tab Studio (tab Riwayat punya BackHandler sendiri)
+    if (!isHistoryOpen) {
+        if (analysisState is AnalysisState.Success || analysisState is AnalysisState.Error) {
+            BackHandler {
+                viewModel.resetAnalysis()
             }
-        )
-        return
-    }
-
-    // Tangani tombol Back sistem Android: jika di hasil/error kembalikan ke beranda, jika proses berjalan batalkan
-    if (analysisState is AnalysisState.Success || analysisState is AnalysisState.Error) {
-        BackHandler {
-            viewModel.resetAnalysis()
-        }
-    } else if (analysisState !is AnalysisState.Idle) {
-        BackHandler {
-            viewModel.cancelAnalysis()
+        } else if (analysisState !is AnalysisState.Idle) {
+            BackHandler {
+                viewModel.cancelAnalysis()
+            }
         }
     }
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = RekapinSpacing.md, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(RekapinRadii.sm))
-                            .background(MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Animation,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
+            if (isHistoryOpen) {
+                HistoryTopBar(
+                    isSelectMode = isHistorySelectMode,
+                    selectedCount = selectedHistoryIds.size,
+                    totalCount = historyList.size,
+                    onBackClick = {
+                        if (isHistorySelectMode) {
+                            isHistorySelectMode = false
+                            selectedHistoryIds = emptySet()
+                        } else {
+                            viewModel.closeHistory()
+                            selectedDestination = 0
+                        }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = stringResource(id = R.string.app_name),
-                            style = RekapinTypography.sectionTitle.copy(
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                lineHeight = 20.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Studio rekap anime",
-                            style = RekapinTypography.caption.copy(
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                )
+            } else {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = RekapinSpacing.md, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(RekapinRadii.sm))
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Animation,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = stringResource(id = R.string.app_name),
+                                style = RekapinTypography.sectionTitle.copy(
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 20.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Studio rekap anime",
+                                style = RekapinTypography.caption.copy(
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
         },
         bottomBar = {
-            if (analysisState is AnalysisState.Idle ||
+            if (isHistoryOpen && isHistorySelectMode) {
+                HistorySelectBottomBar(
+                    selectedCount = selectedHistoryIds.size,
+                    onMergeExport = { showHistoryMergeDialog = true },
+                    onCancel = {
+                        isHistorySelectMode = false
+                        selectedHistoryIds = emptySet()
+                    }
+                )
+            } else if (isHistoryOpen ||
+                analysisState is AnalysisState.Idle ||
                 analysisState is AnalysisState.Success ||
                 analysisState is AnalysisState.Error
             ) {
@@ -329,7 +335,55 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (val state = analysisState) {
+            tabStateHolder.SaveableStateProvider(
+                key = if (isHistoryOpen) "history_tab" else "studio_tab"
+            ) {
+                if (isHistoryOpen) {
+                    HistoryBody(
+                        analyses = historyList,
+                        isSelectMode = isHistorySelectMode,
+                        selectedIds = selectedHistoryIds,
+                        onEnterSelectMode = { initialId ->
+                            isHistorySelectMode = true
+                            selectedHistoryIds = selectedHistoryIds + initialId
+                        },
+                        onToggleSelectId = { id ->
+                            selectedHistoryIds = if (selectedHistoryIds.contains(id)) {
+                                selectedHistoryIds - id
+                            } else {
+                                selectedHistoryIds + id
+                            }
+                        },
+                        onExitSelectMode = {
+                            isHistorySelectMode = false
+                            selectedHistoryIds = emptySet()
+                        },
+                        showMergeDialog = showHistoryMergeDialog,
+                        onDismissMergeDialog = { showHistoryMergeDialog = false },
+                        onBack = {
+                            viewModel.closeHistory()
+                            selectedDestination = 0
+                        },
+                        onSelectAnalysis = { viewModel.openHistoryDetail(it) },
+                        onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
+                        onResumeAnalysis = { resumeId ->
+                            requestNotificationAndStart {
+                                viewModel.startAnalysis(resumeId)
+                            }
+                            viewModel.closeHistory()
+                            selectedDestination = 0
+                        },
+                        onMergeNarrationsWithAi = { parts, onStatus ->
+                            viewModel.mergeNarrationsWithAi(parts, onStatus)
+                        },
+                        getMaxDurationForAnalysis = { viewModel.getMaxDurationForAnalysis(it) },
+                        failedSeriesBibleBuildIds = failedSeriesBibleBuildIds,
+                        seriesBibleBuildInProgressId = seriesBibleBuildInProgressId,
+                        onBuildSeriesBibleNow = { viewModel.buildSeriesBibleNow(it) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    when (val state = analysisState) {
                 is AnalysisState.Success -> {
                     HomeSuccessHost(
                         state = state,
@@ -401,6 +455,8 @@ fun HomeScreen(
                         onOpenManualQuota = { manualQuotaModelToEdit = it },
                         requestNotificationAndStart = requestNotificationAndStart
                     )
+                }
+            }
                 }
             }
         }
@@ -501,7 +557,7 @@ fun HomeScreen(
                 isKeyDecryptFailed = showKeyDecryptFailedDialog,
                 onDismiss = {
                     viewModel.closeSettings()
-                    selectedDestination = 0
+                    selectedDestination = if (isHistoryOpen) 1 else 0
                 }
             )
         }
