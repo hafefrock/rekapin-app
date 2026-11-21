@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -130,10 +130,8 @@ fun SettingsDialog(
         else -> "Pengaturan"
     }
 
-    Dialog(
-        onDismissRequest = handleBack,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    // Overlay biasa (bukan Dialog/window baru) agar pindah ke tab Pengaturan tidak perlu membuat window.
+    Box(modifier = Modifier.fillMaxSize()) {
         BackHandler(onBack = handleBack)
 
         Surface(
@@ -143,7 +141,7 @@ fun SettingsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .systemBarsPadding()
+                    .statusBarsPadding()
                     .imePadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
