@@ -292,7 +292,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val historyList: StateFlow<List<AnimeAnalysisEntity>> = repository.allAnalyses.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        // Eagerly: daftar riwayat dimuat sekali di background dan tetap hangat saat pindah tab.
+        started = SharingStarted.Eagerly,
         initialValue = emptyList()
     )
 
