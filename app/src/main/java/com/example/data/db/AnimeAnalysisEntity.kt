@@ -36,10 +36,16 @@ data class AnimeAnalysisEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "''")
-    val videoFingerprint: String = ""
+    val videoFingerprint: String = "",
+    // VIDEO (default) atau SCRIPT. Untuk SCRIPT, videoUriString berisi path file naskah di penyimpanan aplikasi.
+    @ColumnInfo(defaultValue = "'VIDEO'")
+    val sourceType: String = "VIDEO"
 ) {
     val isCompleted: Boolean
         get() = status == "COMPLETED"
+
+    val isScript: Boolean
+        get() = sourceType == "SCRIPT"
 
     val formattedDate: String
         get() {
