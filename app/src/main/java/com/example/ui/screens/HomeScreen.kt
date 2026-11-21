@@ -100,7 +100,6 @@ fun HomeScreen(
     var showKeySelectionDialog by remember { mutableStateOf(false) }
     var pendingResumeAnalysisId by remember { mutableStateOf<Long?>(null) }
     var manualQuotaModelToEdit by remember { mutableStateOf<String?>(null) }
-    var selectedDestination by remember { mutableIntStateOf(0) }
 
     val historyList by viewModel.historyList.collectAsStateWithLifecycle()
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsStateWithLifecycle()
@@ -112,12 +111,13 @@ fun HomeScreen(
     var showHistoryMergeDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    LaunchedEffect(isHistoryOpen, isSettingsOpen) {
-        selectedDestination = when {
-            isSettingsOpen -> 2
-            isHistoryOpen -> 1
-            else -> 0
-        }
+    // Tab aktif diturunkan langsung dari state ViewModel (tanpa LaunchedEffect) agar tidak telat satu frame.
+    val selectedDestination = when {
+        isSettingsOpen -> 2
+        isHistoryOpen -> 1
+        else -> 0
+    }
+    LaunchedEffect(isHistoryOpen) {
         if (!isHistoryOpen) {
             isHistorySelectMode = false
             selectedHistoryIds = emptySet()
@@ -126,7 +126,6 @@ fun HomeScreen(
     }
 
     val onSelectPrimaryDestination: (Int) -> Unit = { destination ->
-        selectedDestination = destination
         when (destination) {
             0 -> {
                 viewModel.closeHistory()
@@ -213,13 +212,11 @@ fun HomeScreen(
                     viewModel.startAnalysis(historyEntity.id)
                 }
                 viewModel.closeHistory()
-                selectedDestination = 0
             },
             onFinishWithoutCurrentSegment = {
                 viewModel.finishWithoutCurrentSegment(historyEntity.id)
                 viewModel.closeHistoryDetail()
                 viewModel.closeHistory()
-                selectedDestination = 0
             }
         )
         return
@@ -240,7 +237,9 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            if (isHistoryOpen) {
+            if (isSettingsOpen) {
+                // Pengaturan punya header sendiri
+            } else if (isHistoryOpen) {
                 HistoryTopBar(
                     isSelectMode = isHistorySelectMode,
                     selectedCount = selectedHistoryIds.size,
@@ -251,7 +250,6 @@ fun HomeScreen(
                             selectedHistoryIds = emptySet()
                         } else {
                             viewModel.closeHistory()
-                            selectedDestination = 0
                         }
                     }
                 )
@@ -362,7 +360,6 @@ fun HomeScreen(
                         onDismissMergeDialog = { showHistoryMergeDialog = false },
                         onBack = {
                             viewModel.closeHistory()
-                            selectedDestination = 0
                         },
                         onSelectAnalysis = { viewModel.openHistoryDetail(it) },
                         onDeleteAnalysis = { viewModel.deleteHistoryItem(it) },
@@ -371,7 +368,6 @@ fun HomeScreen(
                                 viewModel.startAnalysis(resumeId)
                             }
                             viewModel.closeHistory()
-                            selectedDestination = 0
                         },
                         onMergeNarrationsWithAi = { parts, onStatus ->
                             viewModel.mergeNarrationsWithAi(parts, onStatus)
@@ -550,16 +546,17 @@ fun HomeScreen(
         }
 
         if (isSettingsOpen) {
-            HomeSettingsHost(
-                viewModel = viewModel,
-                activeKeyName = activeKeyName,
-                selectedModel = selectedModel,
-                isKeyDecryptFailed = showKeyDecryptFailedDialog,
-                onDismiss = {
-                    viewModel.closeSettings()
-                    selectedDestination = if (isHistoryOpen) 1 else 0
-                }
-            )
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                HomeSettingsHost(
+                    viewModel = viewModel,
+                    activeKeyName = activeKeyName,
+                    selectedModel = selectedModel,
+                    isKeyDecryptFailed = showKeyDecryptFailedDialog,
+                    onDismiss = {
+                        viewModel.closeSettings()
+                    }
+                )
+            }
         }
 
         if (showKeyDecryptFailedDialog) {
