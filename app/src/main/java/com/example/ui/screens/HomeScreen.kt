@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -813,6 +814,16 @@ private fun HomeIdleHost(
         apiKeys.isNotEmpty() || viewModel.apiKeyStorage.hasApiKey()
     }
 
+    var inputMode by rememberSaveable { mutableIntStateOf(0) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+    InputModeToggle(selectedMode = inputMode, onSelectMode = { inputMode = it })
+    Box(modifier = Modifier.weight(1f)) {
+    if (inputMode == 1) {
+        ScriptSetupContent(
+            onSave = { title, text, onResult -> viewModel.saveScriptDraft(title, text, onResult) }
+        )
+    } else
     IdleSetupContent(
         selectedVideo = selectedVideo,
         promptInterval = promptInterval,
@@ -860,6 +871,8 @@ private fun HomeIdleHost(
         onOpenHistory = { viewModel.openHistory() },
         hasApiKey = hasApiKey
     )
+    }
+    }
 }
 
 @Composable

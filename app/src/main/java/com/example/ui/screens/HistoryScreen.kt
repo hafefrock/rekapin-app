@@ -246,6 +246,7 @@ internal fun HistoryBody(
     onBuildSeriesBibleNow: ((Long) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val scriptContext = androidx.compose.ui.platform.LocalContext.current
     var selectedFilter by remember { mutableStateOf(HistoryFilter.ALL) }
     var itemToDelete by remember { mutableStateOf<AnimeAnalysisEntity?>(null) }
     val listState = rememberLazyListState()
@@ -335,6 +336,12 @@ internal fun HistoryBody(
                                     if (entity.isCompleted) {
                                         onToggleSelectId(entity.id)
                                     }
+                                } else if (entity.isScript) {
+                                    android.widget.Toast.makeText(
+                                        scriptContext,
+                                        "Analisis naskah belum tersedia, segera hadir",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
                                 } else {
                                     onSelectAnalysis(entity)
                                 }
@@ -507,7 +514,9 @@ private fun HistoryItemCard(
     val alpha = if (isSelectMode && !entity.isCompleted) 0.38f else 1f
     val cardShape = RoundedCornerShape(RekapinRadii.md)
 
-    val intervalText = if (entity.intervalSeconds == 0) {
+    val intervalText = if (entity.isScript) {
+        "Naskah · ${entity.videoSizeBytes / 1024} KB"
+    } else if (entity.intervalSeconds == 0) {
         val maxDurText = if (maxSceneDuration == 0) "Tanpa batas" else "${maxSceneDuration}s"
         "Per Adegan ($maxDurText)"
     } else {
@@ -599,6 +608,12 @@ private fun HistoryItemCard(
                         containerColor = HistorySuccessContainer,
                         contentColor = HistorySuccessContent
                     )
+                } else if (entity.isScript) {
+                    HistoryStatusChip(
+                        text = "Draf naskah · belum dianalisis",
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
                 } else {
                     HistoryStatusChip(
                         text = "Belum selesai · ${entity.completedSegmentsCount}/${entity.totalSegments} segmen",
@@ -615,7 +630,7 @@ private fun HistoryItemCard(
             }
 
             // Progres 3 dp & tombol aksi Lanjut 36 dp untuk yang belum selesai
-            if (!entity.isCompleted) {
+            if (!entity.isCompleted && !entity.isScript) {
                 val progress = if (entity.totalSegments > 0) {
                     (entity.completedSegmentsCount.toFloat() / entity.totalSegments.toFloat()).coerceIn(0f, 1f)
                 } else {
