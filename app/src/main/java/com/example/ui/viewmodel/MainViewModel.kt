@@ -692,8 +692,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Menyimpan naskah (cerita/novel/script) ke riwayat sebagai draf.
+     * Teks disimpan sebagai file di penyimpanan aplikasi supaya baris database tetap kecil.
+     */
+    fun saveScriptDraft(title: String, text: String, onResult: (success: Boolean, message: String) -> Unit) {
+        viewModelScope.launch {
+            val cleanText = text.trim()
+            if (cleanText.isEmpty()) {
+                onResult(false, "Naskah masih kosong")
+                return@launch
+            }
+            if (cleanText.length > com.example.data.model.SourceType.MAX_SCRIPT_CHARS) {
+                onResult(false, "Naskah terlalu panjang (maksimal ${com.example.data.model.SourceType.MAX_SCRIPT_CHARS} karakter)")
+                return@launch
+            }
+            val cleanTitle = title.trim().ifBlank {
+                "Naskah " + java.text.SimpleDateFormat("dd MMM HH:mm", java.util.Locale.forLanguageTag("id-ID"))
+                    .format(java.util.Date())
+            }
+            var savedFile: java.io.File? = null
+            try {
+                withContext(Dispatchers.IO) {
+                    val dir = java.io.File(getApplication<Application>().filesDir, "scripts").apply { mkdirs() }
+                    val file = java.io.File(dir, "script_${System.currentTimeMillis()}.txt")
+                    savedFile = file
+                    file.writeText(cleanText, Charsets.UTF_8)
+                    repository.insert(
+                        AnimeAnalysisEntity(
+                            videoUriString = file.absolutePath,
+                            videoName = cleanTitle,
+                            videoSizeBytes = file.length(),
+                            durationMs = 0L,
+                            mimeType = "text/plain",
+                            intervalSeconds = 0,
+                            totalSegments = 0,
+                            completedSegmentsCount = 0,
+                            geminiFileRemoteName = "",
+                            geminiFileUri = "",
+                            status = com.example.data.model.SourceType.STATUS_DRAFT,
+                            characterSheetJson = "[]",
+                            timelineJson = "[]",
+                            segmentSummariesJson = "[]",
+                            narration = "",
+                            sourceType = com.example.data.model.SourceType.SCRIPT
+                        )
+                    )
+                }
+                onResult(true, "Naskah disimpan ke Riwayat")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal menyimpan naskah", e)
+                runCatching { savedFile?.delete() }
+                onResult(false, "Gagal menyimpan naskah: ${e.message ?: "kesalahan tidak diketahui"}")
+            }
+        }
+    }
+
     fun deleteHistoryItem(id: Long) {
         viewModelScope.launch {
+            runCatching { repository.getAnalysisById(id) }.getOrNull()?.let { old ->
+                if (old.isScript) {
+                    withContext(Dispatchers.IO) { runCatching { java.io.File(old.videoUriString).delete() } }
+                }
+            }
             repository.deleteById(id)
             seriesStorage.removeSourceAnalysisId(id)
             seriesBibleStorage.removeBible(id)
